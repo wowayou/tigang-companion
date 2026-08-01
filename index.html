@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0f9b8e">
+  <meta name="description" content="提肛(凯格尔/盆底肌)训练陪伴:节奏引导动画、打卡统计与健康知识。数据只存本地。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="提肛陪伴">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>提肛陪伴</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="app">
+
+    <header class="app-header">
+      <h1 class="app-title">提肛陪伴</h1>
+      <button type="button" id="btn-settings" class="icon-btn" aria-label="设置" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2"></circle>
+          <path d="M19.1 14.6a1.5 1.5 0 0 0 .3 1.65l.05.06a1.85 1.85 0 1 1-2.62 2.62l-.06-.06a1.5 1.5 0 0 0-1.65-.3 1.5 1.5 0 0 0-.91 1.37v.16a1.85 1.85 0 1 1-3.7 0v-.09a1.5 1.5 0 0 0-.98-1.37 1.5 1.5 0 0 0-1.65.3l-.06.06A1.85 1.85 0 1 1 5.2 16.4l.06-.06a1.5 1.5 0 0 0 .3-1.65 1.5 1.5 0 0 0-1.37-.91h-.16a1.85 1.85 0 1 1 0-3.7h.09a1.5 1.5 0 0 0 1.37-.98 1.5 1.5 0 0 0-.3-1.65l-.06-.06A1.85 1.85 0 1 1 7.75 4.8l.06.06a1.5 1.5 0 0 0 1.65.3h.07a1.5 1.5 0 0 0 .91-1.37v-.16a1.85 1.85 0 1 1 3.7 0v.09a1.5 1.5 0 0 0 .91 1.37 1.5 1.5 0 0 0 1.65-.3l.06-.06a1.85 1.85 0 1 1 2.62 2.62l-.06.06a1.5 1.5 0 0 0-.3 1.65v.07a1.5 1.5 0 0 0 1.37.91h.16a1.85 1.85 0 1 1 0 3.7h-.09a1.5 1.5 0 0 0-1.37.91z"></path>
+        </svg>
+      </button>
+    </header>
+
+    <main class="app-main">
+
+      <!-- ======================= 训练 ======================= -->
+      <section class="panel" id="panel-train" role="tabpanel" aria-labelledby="tab-train">
+
+        <div class="card">
+          <h2 class="card-title">选择方案</h2>
+          <div class="pills" role="radiogroup" aria-label="训练方案">
+            <label class="pill">
+              <input type="radio" name="preset" value="beginner" id="preset-beginner">
+              <span>新手入门</span>
+            </label>
+            <label class="pill">
+              <input type="radio" name="preset" value="standard" id="preset-standard" checked>
+              <span>标准训练</span>
+            </label>
+            <label class="pill">
+              <input type="radio" name="preset" value="advanced" id="preset-advanced">
+              <span>进阶耐力</span>
+            </label>
+            <label class="pill">
+              <input type="radio" name="preset" value="quick" id="preset-quick">
+              <span>快速爆发</span>
+            </label>
+            <label class="pill">
+              <input type="radio" name="preset" value="custom" id="preset-custom">
+              <span>自定义</span>
+            </label>
+          </div>
+
+          <div class="custom-panel" id="custom-panel" hidden>
+            <div class="field">
+              <label for="cfg-contract">收缩(秒)</label>
+              <input type="number" id="cfg-contract" min="1" max="30" step="1" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="cfg-relax">放松(秒)</label>
+              <input type="number" id="cfg-relax" min="1" max="30" step="1" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="cfg-reps">每组次数</label>
+              <input type="number" id="cfg-reps" min="1" max="50" step="1" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="cfg-sets">组数</label>
+              <input type="number" id="cfg-sets" min="1" max="10" step="1" inputmode="numeric">
+            </div>
+            <div class="field">
+              <label for="cfg-rest">组间休息(秒)</label>
+              <input type="number" id="cfg-rest" min="0" max="180" step="1" inputmode="numeric">
+            </div>
+          </div>
+
+          <p class="plan-summary" id="plan-summary"></p>
+        </div>
+
+        <div class="coach">
+          <div class="coach-circle" id="coach-circle" data-phase="idle">
+            <span class="phase-label" id="phase-label" aria-live="polite">待开始</span>
+            <span class="countdown" id="countdown" aria-hidden="true">—</span>
+          </div>
+        </div>
+
+        <p class="set-progress" id="set-progress"></p>
+
+        <div class="progress-track" role="presentation">
+          <div class="progress-bar" id="overall-bar"></div>
+        </div>
+
+        <div class="controls">
+          <button type="button" class="btn btn-primary" id="btn-start">开始训练</button>
+          <button type="button" class="btn btn-ghost" id="btn-pause" disabled>暂停</button>
+          <button type="button" class="btn btn-ghost" id="btn-stop" disabled>结束</button>
+        </div>
+
+        <div class="card done-panel" id="done-panel" hidden>
+          <h2 class="done-title">本次训练完成</h2>
+          <ul class="done-list">
+            <li>完成 <strong id="done-reps">0</strong> 次收缩</li>
+            <li>用时 <strong id="done-duration">0 秒</strong></li>
+            <li>当前连续 <strong id="done-streak">0</strong> 天</li>
+          </ul>
+        </div>
+
+      </section>
+
+      <!-- ======================= 统计 ======================= -->
+      <section class="panel" id="panel-stats" role="tabpanel" aria-labelledby="tab-stats" hidden>
+
+        <div class="card streak-card">
+          <div class="streak-num" id="streak-num">0</div>
+          <div class="streak-label">连续打卡</div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="card stat-cell">
+            <div class="stat-value" id="stat-days">0</div>
+            <div class="stat-label">累计打卡天数</div>
+          </div>
+          <div class="card stat-cell">
+            <div class="stat-value" id="stat-sessions">0</div>
+            <div class="stat-label">完成训练次数</div>
+          </div>
+          <div class="card stat-cell">
+            <div class="stat-value" id="stat-reps">0</div>
+            <div class="stat-label">累计收缩次数</div>
+          </div>
+          <div class="card stat-cell">
+            <div class="stat-value" id="stat-duration">0</div>
+            <div class="stat-label">累计时长(分钟)</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">最近 35 天</h2>
+          <div class="heatmap" id="heatmap"></div>
+          <div class="heat-legend">
+            <span>少</span>
+            <i class="heat-cell" data-level="0"></i>
+            <i class="heat-cell" data-level="1"></i>
+            <i class="heat-cell" data-level="2"></i>
+            <i class="heat-cell" data-level="3"></i>
+            <span>多</span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title">数据管理</h2>
+          <p class="hint">所有数据只保存在本机浏览器,不会上传。</p>
+          <div class="row-btns">
+            <button type="button" class="btn btn-ghost" id="btn-export">导出数据</button>
+            <button type="button" class="btn btn-danger" id="btn-clear">清除数据</button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ======================= 知识 ======================= -->
+      <section class="panel" id="panel-knowledge" role="tabpanel" aria-labelledby="tab-knowledge" hidden>
+
+        <article class="card">
+          <h2 class="card-title">为什么值得练</h2>
+          <ul class="kb-list">
+            <li>促进肛周静脉回流,预防和缓解痔疮、肛裂等问题,久坐人群尤其受益</li>
+            <li>增强盆底肌:改善漏尿、预防盆腔脏器脱垂;是产后盆底修复的基础训练</li>
+            <li>男性前列腺术后尿控恢复的常用辅助训练;对性功能也有一定改善</li>
+            <li>传统养生称“撮谷道”,相传乾隆皇帝常年坚持</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2 class="card-title">怎么练才对</h2>
+          <ul class="kb-list">
+            <li>找对肌肉:像“忍住排便/中断排尿”那样收紧肛门及会阴部,可以用中断排尿的感觉来定位肌肉,但<strong>不要经常在排尿时练习</strong>(可能导致排尿不尽、增加尿路感染风险)</li>
+            <li>收紧时正常呼吸、不要憋气;腹部、大腿、臀部保持放松,只用盆底发力</li>
+            <li>坐、站、躺都能练,初学建议先躺或坐</li>
+            <li>循序渐进:从收缩 3 秒起步,逐步延长到 10 秒;慢速练耐力,快速练反应</li>
+            <li>通常坚持 6-12 周会有明显改善,贵在每天坚持</li>
+          </ul>
+        </article>
+
+        <article class="card kb-warn">
+          <h2 class="card-title">注意与禁忌</h2>
+          <ul class="kb-list">
+            <li>急性痔疮发作期、肛周感染/脓肿、肛肠手术恢复期:请先咨询医生</li>
+            <li>盆底肌过度紧张者(如慢性盆腔痛、排便困难伴痉挛)不适合此类收缩训练,应先就医评估</li>
+            <li>练习中出现疼痛请立即停止并就医;孕期练习前建议咨询产科医生</li>
+            <li>不要过度训练,按推荐组数即可,肌肉疲劳反而可能暂时加重症状</li>
+          </ul>
+        </article>
+
+        <p class="kb-source">训练方案参考 Mayo Clinic 与 NHS 的盆底肌训练公开建议。本应用仅供健康锻炼参考,不构成医疗建议。</p>
+
+      </section>
+
+    </main>
+
+    <footer class="app-footer">仅供锻炼参考,不构成医疗建议</footer>
+
+  </div>
+
+  <nav class="tabbar" role="tablist" aria-label="主导航">
+    <button type="button" class="tab is-active" id="tab-train" role="tab" aria-controls="panel-train" aria-selected="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="8.2"></circle>
+        <circle cx="12" cy="12" r="3.4"></circle>
+      </svg>
+      <span>训练</span>
+    </button>
+    <button type="button" class="tab" id="tab-stats" role="tab" aria-controls="panel-stats" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 20v-7"></path>
+        <path d="M12 20V4"></path>
+        <path d="M19 20v-11"></path>
+      </svg>
+      <span>统计</span>
+    </button>
+    <button type="button" class="tab" id="tab-knowledge" role="tab" aria-controls="panel-knowledge" aria-selected="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 5.2A2.2 2.2 0 0 1 6.2 3H19v14.5H6.2A2.2 2.2 0 0 0 4 19.7z"></path>
+        <path d="M4 19.7A2.2 2.2 0 0 1 6.2 21H19"></path>
+      </svg>
+      <span>知识</span>
+    </button>
+  </nav>
+
+  <dialog class="dlg" id="dlg-settings" aria-label="设置">
+    <h2 class="dlg-title">设置</h2>
+
+    <label class="opt-row">
+      <span class="opt-text">提示音</span>
+      <input type="checkbox" id="opt-sound" class="switch">
+    </label>
+
+    <label class="opt-row">
+      <span class="opt-text">震动</span>
+      <input type="checkbox" id="opt-vibration" class="switch">
+    </label>
+
+    <label class="opt-row">
+      <span class="opt-text">每日提醒</span>
+      <input type="checkbox" id="opt-reminder-enabled" class="switch">
+    </label>
+
+    <label class="opt-row">
+      <span class="opt-text">提醒时间</span>
+      <input type="time" id="opt-reminder-time" class="time-input" value="21:00">
+    </label>
+
+    <p class="hint">网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳</p>
+
+    <form method="dialog" class="dlg-actions">
+      <button class="btn btn-primary" value="close">完成</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

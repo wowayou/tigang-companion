@@ -1,0 +1,52 @@
+# 提肛陪伴 (tigang-companion)
+
+一个提肛(凯格尔/盆底肌)训练陪伴应用:跟着动画节奏收缩/放松,自动打卡、统计连续天数,内置科学训练知识。零依赖 PWA,可安装到手机主屏,完全离线可用,数据只存在你自己的设备上。
+
+**在线体验**:<https://wowayou.github.io/tigang-companion/>(手机浏览器打开 → 菜单 → 添加到主屏幕,即可当 App 用)
+
+## 功能
+
+- **节奏引导**:圆圈随"收缩/放松"缩放,配倒计时、提示音(可关)、震动(可关)
+- **四档方案 + 自定义**:新手入门 3s/3s、标准 5s/5s、进阶耐力 10s/10s、快速爆发 1s/1s,参考 Mayo Clinic / NHS 盆底肌训练建议;收缩时长、次数、组数均可自定义
+- **打卡统计**:连续天数、累计天数/次数/时长、最近 35 天热力图
+- **健康知识**:好处、正确做法、注意与禁忌
+- **每日提醒**:设定时间弹通知(网页限制:仅应用打开时生效)
+- **数据自主**:localStorage 本地存储,一键导出 JSON / 清除
+
+## 运行
+
+```bash
+npm run serve        # 即 python3 -m http.server 8080
+# 浏览器打开 http://localhost:8080
+```
+
+任意静态服务器均可(纯静态文件,无构建步骤)。部署到 HTTPS 环境后,手机浏览器"添加到主屏幕"即可当 App 使用(离线可用)。
+
+## 测试
+
+```bash
+npm test             # 即裸 node --test  (需 Node ≥ 20;Node 24 起不要用 node --test tests/ 目录参数)
+```
+
+覆盖训练状态机(阶段转移、暂停恢复、跨阶段追帧、不可变性)、打卡统计(连续天数边界、跨月日期算术)、存储(损坏数据回退、设置合并)。
+
+## 目录
+
+```
+core/engine.js    训练状态机(纯函数,时间外部注入)
+core/stats.js     打卡/连续天数/热力图数据
+core/storage.js   localStorage 读写与默认值
+app.js            UI 胶水层
+index.html / styles.css / sw.js / manifest.webmanifest / icon.svg
+tests/            node --test 单元测试
+SPEC.md           实现规格(契约文档)
+DEVELOPMENT.md    技术决策记录
+```
+
+## 部署
+
+push 到 `main` 会自动跑测试并部署到 GitHub Pages;移植到 Cloudflare/Netlify/Vercel/自建服务器的配方见 [DEPLOY.md](DEPLOY.md)(纯静态,零代码改动)。
+
+## 免责声明
+
+本应用仅供健康锻炼参考,不构成医疗建议。急性痔疮发作期、肛周感染、肛肠术后、盆底肌过度紧张(慢性盆腔痛)人群请先咨询医生;练习中出现疼痛请立即停止并就医。

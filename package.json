@@ -1,0 +1,11 @@
+{
+  "name": "tigang-companion",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "提肛陪伴 — 零依赖的凯格尔/盆底肌训练 PWA",
+  "scripts": {
+    "test": "node --test",
+    "serve": "python3 -m http.server 8080"
+  }
+}

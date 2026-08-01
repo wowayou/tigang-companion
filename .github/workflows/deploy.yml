@@ -1,0 +1,47 @@
+name: Test & Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+
+  deploy-github-pages:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # 首次运行自动启用 Pages(Source = GitHub Actions)
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      # 纯静态、无构建:产物就是仓库根目录(.git/.github 会被自动排除)
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  # 之后要加其他部署目标(Cloudflare / Netlify / 自建服务器 rsync 等),
+  # 在此追加并列的 deploy-* job(needs: test),配方见 DEPLOY.md。

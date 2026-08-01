@@ -5,7 +5,8 @@
 ## 当前:GitHub Pages(已自动化)
 
 - push 到 `main` → `.github/workflows/deploy.yml`:先 `npm test`,**测试全绿才部署**。
-- 首次运行由 `actions/configure-pages` 自动启用 Pages(Source = GitHub Actions,不走 Jekyll)。
+- 首次运行由 `actions/configure-pages` 自动启用 Pages;⚠️ 若报 `Resource not accessible by integration`(GITHUB_TOKEN 无权**创建** Pages 站点,2026-08 实测踩坑),本地执行一次
+  `gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow` 再重跑工作流即可,站点存在后该步骤永久幂等。
 - 线上地址:<https://wowayou.github.io/tigang-companion/>
 - 手动重发:仓库 Actions → Test & Deploy → Run workflow。
 

@@ -70,6 +70,23 @@ export function computeStreak(records, todayStr) {
   return streak;
 }
 
+/**
+ * 历史最长连续打卡天数(与今天无关,只看记录本身)。
+ * 徽章用它而不是 computeStreak:断档后已解锁的徽章不该被收回。
+ */
+export function longestStreak(records) {
+  const dates = [...finishedDateSet(records)].sort();
+  let best = 0;
+  let run = 0;
+  let prev = null;
+  for (const d of dates) {
+    run = prev !== null && addDays(prev, 1) === d ? run + 1 : 1;
+    if (run > best) best = run;
+    prev = d;
+  }
+  return best;
+}
+
 /** 汇总:{ sessions, finishedSessions, totalReps, totalDurationSec, activeDays }。 */
 export function totals(records) {
   const list = asArray(records);

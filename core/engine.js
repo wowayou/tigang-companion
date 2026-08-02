@@ -2,16 +2,19 @@
 // 约束:不访问 DOM、不调用 Date.now()、不访问 localStorage。
 // 所有时间戳由调用方以 nowMs(毫秒)传入;所有更新均为不可变更新(返回新对象)。
 
+// holdSec = 0 表示不启用「维持」阶段(收缩→放松两段式,v1 行为);
+// > 0 则每次循环变成 收紧 → 维持 → 放松 三段式。
 export const PRESETS = {
-  beginner: { name: '新手入门', contractSec: 3, relaxSec: 3, repsPerSet: 10, sets: 2, restSec: 20, prepareSec: 3 },
-  standard: { name: '标准训练', contractSec: 5, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
-  advanced: { name: '进阶耐力', contractSec: 10, relaxSec: 10, repsPerSet: 10, sets: 3, restSec: 30, prepareSec: 3 },
-  quick:    { name: '快速爆发', contractSec: 1, relaxSec: 1, repsPerSet: 20, sets: 2, restSec: 20, prepareSec: 3 },
+  beginner: { name: '新手入门', contractSec: 3, holdSec: 0, relaxSec: 3, repsPerSet: 10, sets: 2, restSec: 20, prepareSec: 3 },
+  standard: { name: '标准训练', contractSec: 5, holdSec: 0, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
+  advanced: { name: '进阶耐力', contractSec: 10, holdSec: 0, relaxSec: 10, repsPerSet: 10, sets: 3, restSec: 30, prepareSec: 3 },
+  quick:    { name: '快速爆发', contractSec: 1, holdSec: 0, relaxSec: 1, repsPerSet: 20, sets: 2, restSec: 20, prepareSec: 3 },
 };
 
 // 字段范围(顺序即 validateConfig 返回对象的键顺序)
 const FIELD_RANGES = {
   contractSec: { min: 1, max: 30 },
+  holdSec:     { min: 0, max: 60 },
   relaxSec:    { min: 1, max: 30 },
   repsPerSet:  { min: 1, max: 50 },
   sets:        { min: 1, max: 10 },
@@ -32,6 +35,15 @@ function toFiniteNumber(value) {
 
 function clamp(n, min, max) {
   return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * 读取 holdSec,缺失/非法一律当 0。
+ * v1 存档与外部传入的旧形状 config 都没有这个键,当 0 处理即自然退化成两段式。
+ */
+function holdOf(config) {
+  const n = Number(config && config.holdSec);
+  return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 /**
@@ -69,12 +81,13 @@ export function createSession(rawConfig) {
   };
 }
 
-/** prepare/contract/relax/rest 对应秒数;其他阶段(idle/done)为 0。 */
+/** prepare/contract/hold/relax/rest 对应秒数;其他阶段(idle/done)为 0。 */
 export function phaseDurationSec(config, phase) {
   if (!config) return 0;
   switch (phase) {
     case 'prepare': return config.prepareSec;
     case 'contract': return config.contractSec;
+    case 'hold': return holdOf(config);
     case 'relax': return config.relaxSec;
     case 'rest': return config.restSec;
     default: return 0;
@@ -84,9 +97,10 @@ export function phaseDurationSec(config, phase) {
 /** 一次完整训练的总时长(秒)。 */
 export function totalDurationSec(config) {
   const { prepareSec, contractSec, relaxSec, repsPerSet, sets, restSec } = config;
+  const holdSec = holdOf(config);
   return (
     prepareSec +
-    sets * repsPerSet * contractSec +
+    sets * repsPerSet * (contractSec + holdSec) +
     sets * (repsPerSet - 1) * relaxSec +
     (sets - 1) * restSec
   );
@@ -136,7 +150,11 @@ export function tick(state, nowMs) {
     if (++guard > 1e6) break;
     const boundary = phaseEndsAt;
 
-    if (phase === 'contract') {
+    if (phase === 'contract' && holdOf(config) > 0) {
+      // 收紧到位 → 维持;本次收缩要到维持结束才算完成
+      phase = 'hold';
+    } else if (phase === 'contract' || phase === 'hold') {
+      // 两段式的 contract 末尾、或三段式的 hold 末尾:一次收缩完成
       completedReps += 1;
       if (repIndex < config.repsPerSet - 1) {
         // 本组还有下一次收缩:进入 relax,索引指向下一次收缩
@@ -209,15 +227,23 @@ export function remainingInPhaseMs(state, nowMs) {
 /** 当前阶段结束之后、剩余所有阶段的时长(秒)。 */
 function remainingAfterPhaseSec(config, phase, setIndex, repIndex) {
   const { contractSec, relaxSec, repsPerSet, sets, restSec } = config;
-  const setCost = repsPerSet * contractSec + (repsPerSet - 1) * relaxSec;
+  const holdSec = holdOf(config);
+  const repCost = contractSec + holdSec;               // 一次收缩(收紧+维持)的成本
+  const setCost = repsPerSet * repCost + (repsPerSet - 1) * relaxSec;
   const laterSets = (sets - 1 - setIndex) * (restSec + setCost);
+  // 本组当前这次之后还剩几次完整的「放松+收紧+维持」
+  const laterRepsInSet = (repsPerSet - 1 - repIndex) * (relaxSec + repCost);
+
   if (phase === 'contract') {
-    // 本组剩余 (repsPerSet-1-repIndex) 次 收缩+放松
-    return (repsPerSet - 1 - repIndex) * (contractSec + relaxSec) + laterSets;
+    // 后面还有本次的维持段(两段式时 holdSec=0,自然退化)
+    return holdSec + laterRepsInSet + laterSets;
+  }
+  if (phase === 'hold') {
+    return laterRepsInSet + laterSets;
   }
   if (phase === 'prepare' || phase === 'relax' || phase === 'rest') {
-    // 下一个阶段是第 (setIndex, repIndex) 次收缩
-    return (repsPerSet - repIndex) * contractSec + (repsPerSet - 1 - repIndex) * relaxSec + laterSets;
+    // 下一个阶段是第 (setIndex, repIndex) 次收缩的收紧段
+    return (repsPerSet - repIndex) * repCost + (repsPerSet - 1 - repIndex) * relaxSec + laterSets;
   }
   return 0;
 }

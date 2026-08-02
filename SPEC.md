@@ -1,11 +1,11 @@
-# 提肛陪伴 (tigang-companion) — 实现规格 v1
+# 提肛陪伴 (tigang-companion) — 实现规格
 
 一个提肛(凯格尔/盆底肌)训练陪伴 PWA:引导节奏动画 + 打卡统计 + 健康知识。
 零依赖、无构建步骤、无后端,数据全部存本地 localStorage。
 
 本规格是实现的唯一依据,**函数签名、状态字段名、DOM id 必须与本文完全一致**(UI 与核心逻辑由不同 agent 并行实现,契约不一致会导致集成失败)。
 
-## §1 文件清单(不得增减)
+## §1 文件清单
 
 ```
 tigang-companion/
@@ -16,61 +16,74 @@ tigang-companion/
 ├── sw.js                 # Service Worker
 ├── manifest.webmanifest
 ├── icon.svg
+├── icon-180.png          # apple-touch-icon(方形满铺,iOS 会自己切圆角)
+├── icon-192.png
+├── icon-512.png
+├── icon-maskable-512.png # 内容仅占中心 60% 安全区
 ├── core/
 │   ├── engine.js         # 训练状态机(纯函数,零 DOM)
 │   ├── stats.js          # 打卡/连续天数/热力图数据(纯函数)
-│   └── storage.js        # localStorage 读写
+│   ├── storage.js        # localStorage 读写
+│   └── achievements.js   # 成就徽章 / 今日目标(纯函数)
+├── tools/
+│   └── make-icons.mjs    # 零依赖 PNG 图标生成脚本(一次性运行,产物提交进仓库)
 └── tests/
     ├── engine.test.mjs
     ├── stats.test.mjs
-    └── storage.test.mjs
+    ├── storage.test.mjs
+    └── achievements.test.mjs
 ```
 
-约束(两个 agent 都必须遵守):
+新增文件须同步本清单 + sw.js 预缓存清单 + 升级 `CACHE_NAME`,否则用户拿不到更新。
+
+约束:
 - 禁止任何 npm 依赖、CDN 引用、构建工具;只用浏览器/Node 原生能力。
-- 所有 JS 是 ES module;项目根目录裸 `node --test` 必须全绿(Node ≥ 24 不再接受 `node --test tests/` 目录参数,会伪装成 1 个失败,见 §10)。
+- 所有 JS 是 ES module;项目根目录裸 `node --test` 必须全绿(Node ≥ 24 不再接受 `node --test tests/` 目录参数,会伪装成 1 个失败,见 §11)。
 - 禁止 HTML 内联事件(`onclick=`);全部 `addEventListener`。
-- core/ 三个模块不得访问 DOM、`Date.now()`、`localStorage`(时间与存储对象一律由调用方传入),保证可测。
+- core/ 四个模块不得访问 DOM、`Date.now()`、`localStorage`(时间与存储对象一律由调用方传入),保证可测。
 - 中文 UI 文案以本规格给出的为准。
 
 ## §2 训练方案(产品依据)
 
 参考 Mayo Clinic 与 NHS 盆底肌训练公开建议:
 
-| preset key | 名称 | 收缩s | 放松s | 每组次数 | 组数 | 组间休息s |
-|---|---|---|---|---|---|---|
-| beginner | 新手入门 | 3 | 3 | 10 | 2 | 20 |
-| standard | 标准训练 | 5 | 5 | 12 | 3 | 30 |
-| advanced | 进阶耐力 | 10 | 10 | 10 | 3 | 30 |
-| quick | 快速爆发 | 1 | 1 | 20 | 2 | 20 |
+| preset key | 名称 | 收缩s | 维持s | 放松s | 每组次数 | 组数 | 组间休息s |
+|---|---|---|---|---|---|---|---|
+| beginner | 新手入门 | 3 | 0 | 3 | 10 | 2 | 20 |
+| standard | 标准训练 | 5 | 0 | 5 | 12 | 3 | 30 |
+| advanced | 进阶耐力 | 10 | 0 | 10 | 10 | 3 | 30 |
+| quick | 快速爆发 | 1 | 0 | 1 | 20 | 2 | 20 |
 
-准备时间 prepareSec 统一默认 3。另支持 custom 自定义。
+四个预设的 `holdSec` 都固化为 0(默认关闭「维持」阶段,老用户行为不变)。`holdSec` 是**全局设置**(见 §5),不是预设/custom 各自的字段——同一时刻只有一份「维持时长」,叠加在任意方案之上。准备时间 prepareSec 统一默认 3。另支持 custom 自定义。
 
 ## §3 core/engine.js 契约
 
 ```js
+// holdSec = 0 表示不启用「维持」阶段(收紧→放松两段式,v1 行为);
+// > 0 则每次循环变成 收紧 → 维持 → 放松 三段式。
 export const PRESETS = {
-  beginner: { name: '新手入门', contractSec: 3, relaxSec: 3, repsPerSet: 10, sets: 2, restSec: 20, prepareSec: 3 },
-  standard: { name: '标准训练', contractSec: 5, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
-  advanced: { name: '进阶耐力', contractSec: 10, relaxSec: 10, repsPerSet: 10, sets: 3, restSec: 30, prepareSec: 3 },
-  quick:    { name: '快速爆发', contractSec: 1, relaxSec: 1, repsPerSet: 20, sets: 2, restSec: 20, prepareSec: 3 },
+  beginner: { name: '新手入门', contractSec: 3, holdSec: 0, relaxSec: 3, repsPerSet: 10, sets: 2, restSec: 20, prepareSec: 3 },
+  standard: { name: '标准训练', contractSec: 5, holdSec: 0, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
+  advanced: { name: '进阶耐力', contractSec: 10, holdSec: 0, relaxSec: 10, repsPerSet: 10, sets: 3, restSec: 30, prepareSec: 3 },
+  quick:    { name: '快速爆发', contractSec: 1, holdSec: 0, relaxSec: 1, repsPerSet: 20, sets: 2, restSec: 20, prepareSec: 3 },
 };
 
 // 校验并夹取范围;非法/缺失字段回落到 standard 的对应值,再夹到范围内并取整。
-// 范围: contractSec 1-30, relaxSec 1-30, repsPerSet 1-50, sets 1-10, restSec 0-180, prepareSec 0-10
-// 返回新对象 { contractSec, relaxSec, repsPerSet, sets, restSec, prepareSec }(不含 name)。
+// 范围: contractSec 1-30, holdSec 0-60, relaxSec 1-30, repsPerSet 1-50, sets 1-10, restSec 0-180, prepareSec 0-10
+// 返回新对象,键顺序固定为:
+// { contractSec, holdSec, relaxSec, repsPerSet, sets, restSec, prepareSec }(不含 name)。
 export function validateConfig(raw) {}
 
 // 状态对象(纯数据,可 JSON 序列化):
 // {
 //   config,                 // validateConfig 后的配置
-//   phase: 'idle'|'prepare'|'contract'|'relax'|'rest'|'done',
+//   phase: 'idle'|'prepare'|'contract'|'hold'|'relax'|'rest'|'done',
 //   setIndex: 0,            // 0 起,始终指向当前/即将进行的组
 //   repIndex: 0,            // 0 起,始终指向当前/即将进行的收缩
 //   phaseEndsAt: null,      // 当前阶段结束的毫秒时间戳;idle/done/暂停时为 null
 //   paused: false,
 //   pausedRemainingMs: null,
-//   completedReps: 0,       // 已完成的收缩总次数
+//   completedReps: 0,       // 已完成的收缩总次数(hold 结束才计数,见下方状态机)
 //   startedAt: null,        // 毫秒时间戳
 //   finishedAt: null,
 // }
@@ -82,18 +95,23 @@ export function pause(state, nowMs) {}   // 运行中才生效;记 pausedRemaini
 export function resume(state, nowMs) {}  // paused 才生效;phaseEndsAt = nowMs + pausedRemainingMs
 export function reset(state) {}          // 返回 createSession(state.config)
 
-export function phaseDurationSec(config, phase) {}      // prepare/contract/relax/rest 对应秒数
+export function phaseDurationSec(config, phase) {}      // prepare/contract/hold/relax/rest 对应秒数
 export function totalDurationSec(config) {}
-// = prepare + sets*reps*contract + sets*(reps-1)*relax + (sets-1)*rest
+// = prepare + sets*reps*(contract+hold) + sets*(reps-1)*relax + (sets-1)*rest
 export function remainingInPhaseMs(state, nowMs) {}     // idle/done→0;paused→pausedRemainingMs
 export function remainingTotalSec(state, nowMs) {}      // 当前阶段剩余 + 之后所有阶段时长
 export function overallProgress(state, nowMs) {}        // 0..1;= 1 - remainingTotal/total;done→1, idle→0
 ```
 
+**holdSec 兼容性保证**:内部辅助函数 `holdOf(config)` 读取 `config.holdSec`,缺失或非法(非数字、≤0)一律当 0 处理。v1 存档、以及任何不带 `holdSec` 键的裸 config 传入 `phaseDurationSec`/`totalDurationSec`/状态机,都会自然退化成两段式(等价于 v1 行为),不会算出 `NaN` 或抛异常。这是升级路径的核心保证,任何改动都不得破坏它。
+
 状态机转移(tick 在 `nowMs >= phaseEndsAt` 时逐个跨越边界,**用 while 循环**,一次 tick 可跨多个阶段;新阶段的 phaseEndsAt = 旧 phaseEndsAt + 新阶段时长×1000,即以边界累加计时、不产生漂移):
 
 - `prepare` → `contract`(索引不变)
-- `contract` 结束 → `completedReps++`;然后:
+- `contract` 结束:
+  - 若 `holdSec > 0` → 进入 `hold`(**本次收缩此时尚未计数**,`completedReps` 不变)
+  - 若 `holdSec === 0`(两段式)→ 视同下面「一次收缩完成」,直接走 `completedReps++` 分支(与 v1 完全一致)
+- `hold` 结束 → 一次收缩完成:`completedReps++`;然后:
   - 若 `repIndex < repsPerSet-1` → `relax`,同时 `repIndex++`(relax 期间索引指向下一次收缩)
   - 否则若 `setIndex < sets-1` → `setIndex++; repIndex=0`;`restSec>0` 进 `rest`,`restSec===0` 直接进下一组 `contract`
   - 否则 → `done`,`finishedAt` = 该边界时间戳,`phaseEndsAt=null`
@@ -116,6 +134,10 @@ export function makeRecord({ dateStr, completedReps, totalReps, durationSec, fin
 // 锚点:今天有完成记录则从今天起算,否则从昨天起算;锚点无记录 → 0;向前逐日累计。
 export function computeStreak(records, todayStr) {}
 
+// 历史最长连续打卡天数,与"今天"无关,只看记录本身(排序后找最长连续段)。
+// 用于成就系统:断档后已解锁的连续类徽章不该被收回,见 §6.1 设计理由。
+export function longestStreak(records) {}
+
 // { sessions, finishedSessions, totalReps, totalDurationSec, activeDays }
 // activeDays = 有 ≥1 条 finished 记录的不同日期数
 export function totals(records) {}
@@ -132,7 +154,9 @@ export const STORAGE_KEY = 'tigang-companion.v1';
 export const DEFAULT_SETTINGS = {
   presetKey: 'standard',            // 'beginner'|'standard'|'advanced'|'quick'|'custom'
   custom: { contractSec: 5, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
+  holdSec: 0,                       // 「维持」阶段秒数,0=关闭;全局值,叠加在任何方案(含 custom)之上
   sound: true,
+  voice: false,                     // 语音播报阶段名;默认关(会外放,使用场景多在公共/半公共环境)
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
 };
@@ -146,7 +170,59 @@ export function clearAll(storage) {}
 export function exportJSON(data) {}          // 返回 JSON.stringify({ app:'tigang-companion', version:1, ...data }, null, 2)
 ```
 
-## §6 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
+## §6 core/achievements.js 契约
+
+成就徽章 / 今日目标,纯函数,同样不得访问 DOM/`Date.now()`/`localStorage`;今天的日期由调用方以 `todayStr` 传入。
+
+```js
+// 12 枚徽章定义,顺序即徽章墙(4×3)展示顺序,按解锁难度递增。
+// metric ∈ 'finishedSessions'|'bestStreak'|'activeDays'|'totalReps'
+export const ACHIEVEMENTS = [/* { id, icon, name, desc, metric, threshold } × 12 */];
+
+export const DEFAULT_DAILY_GOAL = 1;
+
+// 徽章/目标要用到的全部指标。
+export function computeMetrics(records, todayStr) {}
+// → { streak, bestStreak, activeDays, finishedSessions, totalReps, totalDurationSec, todayFinished, todayReps }
+
+// 徽章墙完整数据。
+export function evaluate(records, todayStr) {}
+// → { metrics, badges, unlockedCount, total, next, nextByMetric }
+// badges: ACHIEVEMENTS 每项附加 { current, unlocked, remaining, progress(0..1) }
+// next  : 未解锁徽章里 progress 最高的一枚(并列取定义顺序靠前的);全部解锁则 null
+// nextByMetric: 每类指标各自的下一枚未解锁徽章,用于定向提示(如「再练 2 天解锁『一周不断』」)
+
+// 当前已解锁的徽章 id 数组(定义顺序)。
+export function unlockedIds(records, todayStr) {}
+
+// 本次训练新解锁了哪些徽章:传入写入记录「前」的 id 数组与「后」的 id 数组。
+export function newlyUnlocked(beforeIds, afterIds) {}   // → 徽章定义数组(定义顺序)
+
+// 今日目标进度(默认每天完成 1 次训练算达标)。
+export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
+// → { done, goal, met, remaining, progress }
+```
+
+### §6.1 徽章表
+
+| id | icon | 名称 | 条件 | metric | threshold |
+|---|---|---|---|---|---|
+| first-session | 🌱 | 迈出第一步 | 完成 1 次训练 | finishedSessions | 1 |
+| streak-3 | 🔥 | 三日不辍 | 连续打卡 3 天 | bestStreak | 3 |
+| reps-100 | 💯 | 百次收缩 | 累计 100 次收缩 | totalReps | 100 |
+| streak-7 | ⚡ | 一周不断 | 连续打卡 7 天 | bestStreak | 7 |
+| days-10 | 📗 | 十日之功 | 累计打卡 10 天 | activeDays | 10 |
+| reps-500 | 🌊 | 五百次 | 累计 500 次收缩 | totalReps | 500 |
+| streak-14 | 🏅 | 双周坚持 | 连续打卡 14 天 | bestStreak | 14 |
+| days-30 | 📅 | 满月打卡 | 累计打卡 30 天 | activeDays | 30 |
+| reps-2000 | 🗻 | 两千次 | 累计 2000 次收缩 | totalReps | 2000 |
+| streak-30 | 👑 | 月度不断 | 连续打卡 30 天 | bestStreak | 30 |
+| days-100 | 🎯 | 百日打卡 | 累计打卡 100 天 | activeDays | 100 |
+| reps-10000 | 🏆 | 万次收缩 | 累计 10000 次收缩 | totalReps | 10000 |
+
+**设计理由(bestStreak 而非当前 streak)**:连续类徽章看 `stats.longestStreak`(历史最长)而不是 `computeStreak`(当前连续)。原因是断档后已经拿到的徽章不该被收回——用当前 streak 判定会导致用户某天没打卡,昨天还挂着的「一周不断」徽章瞬间消失,这是负向体验;历史最长值只增不减,徽章墙因而具备正确的「成就」语义(拿到就是拿到了)。
+
+## §7 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
 
 engine.test.mjs 至少覆盖:
 1. 四个 PRESETS 均通过 validateConfig 且值不变;
@@ -161,29 +237,69 @@ engine.test.mjs 至少覆盖:
 8. remainingTotalSec 随时间单调不增,overallProgress 从 0 到 1(done 恰为 1);
 9. 不可变性:tick 前后旧 state 深比较不变。
 
-stats.test.mjs 至少覆盖:补零格式、addDays 跨月/跨年、streak 的 6 种情形(空、仅今天、今昨连续、仅昨天、断档、finished=false 不计)、totals 聚合、lastNDays 长度/排序/空日补零。
+engine.test.mjs 另需覆盖(v2,维持阶段):
+10. holdSec=0 时行为与 v1 完全一致(两段式回归防线);
+11. holdSec>0 时 contract 结束进 hold、completedReps 此时不变,hold 结束才 completedReps++;
+12. 不带 holdSec 键的裸 config 传入 phaseDurationSec/totalDurationSec/tick 不产生 NaN,自然退化为两段式;
+13. totalDurationSec 含 hold 项的公式正确性。
 
-storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、save/load 往返、旧 settings 缺键时合并出新默认键、save 异常返回 false。
+stats.test.mjs 至少覆盖:补零格式、addDays 跨月/跨年、streak 的 6 种情形(空、仅今天、今昨连续、仅昨天、断档、finished=false 不计)、totals 聚合、lastNDays 长度/排序/空日补零、longestStreak(空/单天/连续/断档取最长/同日多条不重复计数/跨月跨年/顺序无关/与 computeStreak 的区别)。
 
-## §7 UI 规格(index.html + styles.css + app.js)
+storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、save/load 往返、旧 settings 缺键时合并出新默认键(含 v1 存档升级后拿到 holdSec/voice 新默认键且不改变已有取值)、save 异常返回 false。
+
+achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 的 badges/next/nextByMetric、unlockedIds、newlyUnlocked(前后快照对比)、dailyGoal 达标/未达标、bestStreak 断档后徽章不被收回。
+
+## §8 UI 规格(index.html + styles.css + app.js)
 
 移动优先,内容区 max-width 480px 居中;配色:主色 `#0f9b8e`(teal),背景 `#f6f8f7`,文字 `#1c2b2a`。底部固定 3 个 tab:训练 / 统计 / 知识(切换即 display 切换,无路由)。页面 `<html lang="zh-CN">`,`<meta name="viewport" content="width=device-width, initial-scale=1">`,`<meta name="theme-color" content="#0f9b8e">`。
 
+顶栏 `header.app-header`:标题 + 常驻连续天数芯片 `#streak-chip`(内含 `#streak-chip-num`,streak≤0 时 `hidden`,不显示比空着更糟的"0天")+ 右上角 `#btn-settings`。顶栏为不透明背景(v1 半透明渐变滚动时卡片文字会从标题后透出,v2 改不透明 + 下缘一层淡出伪元素)。
+
+页面整体布局:`.app` 为 flex 列容器,`min-height: calc(100dvh - tabbar高 - safe-area-inset-bottom)`;`.coach`(引导圆所在容器)`flex: 1 1 auto` 吃掉剩余空间——高屏上圆能居中而不是整体堆在顶部,矮屏则靠 `.app` 的 `min-height` 兜底不出现整页滚动(实测 390×620 与 390×760 两种视口高度均单屏不滚动)。
+
 ### 训练 tab(默认)
-- 方案选择:5 个 radio(name="preset",value 为 beginner/standard/advanced/quick/custom)渲染成胶囊按钮;选 custom 时显示自定义面板(number 输入:`#cfg-contract` `#cfg-relax` `#cfg-reps` `#cfg-sets` `#cfg-rest`,范围与 §3 一致)。方案变更即持久化到 settings 并 reset 会话;训练进行中禁用方案切换。
-- 引导圆 `#coach-circle`:直径约 220px 的圆,内部上方 `#phase-label`(准备/收缩/放松/休息/完成/待开始),中间大号 `#countdown`(当前阶段剩余秒,`Math.ceil(remainingInPhaseMs/1000)`;idle/done 态显示 `—`)。
-  动画:collapse/expand 用 CSS `transform: scale()` + `transition`,JS 在进入阶段时把 `transitionDuration` 设为该阶段秒数、contract 缩到 0.62、relax/rest/prepare 回到 1;prepare 与 rest 附加轻微呼吸脉动 class。
-- 进度:`#set-progress` 文案 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);总进度条 `#overall-bar`(宽度=overallProgress)。
-- 按钮:`#btn-start`(开始训练)、`#btn-pause`(暂停/继续,文案随态切换)、`#btn-stop`(结束)。驱动:`setInterval` 100ms,`next = tick(state, Date.now())`;**阶段推进**(phase 或 setIndex/repIndex 任一变化——`restSec=0` 时跨组是 contract→contract,仅比较 phase 会漏一拍)时触发提示音/震动;done 时写入记录并展示完成面板 `#done-panel`(本次完成 N 次收缩、用时、当前连续 X 天)。
+
+**方案卡**默认折叠成一行 `#plan-toggle`(点击展开/收起 `#plan-body`),内含当前方案名 `#plan-name` 与摘要 `#plan-summary`(如 `收紧 5s · 维持 3s · 放松 5s · 12 次 × 3 组 · 约 5 分 24 秒`,未开维持则为 `收缩 5s · …`)。折叠的原因:v1 展开的 5 个方案胶囊 + 摘要会把引导圆挤出手机首屏。训练进行中 `#plan-toggle` 禁用且强制收起。
+
+展开后 `#plan-body` 内:
+- 方案选择:5 个 radio(name="preset",value 为 beginner/standard/advanced/quick/custom)渲染成胶囊按钮;选 custom 时显示自定义面板(number 输入:`#cfg-contract` `#cfg-relax` `#cfg-reps` `#cfg-sets` `#cfg-rest`,范围与 §3 一致,不含 prepareSec/holdSec 输入)。方案变更即持久化到 settings 并 reset 会话;训练进行中禁用方案切换。
+- **维持开关**:`#opt-hold-enabled`(iOS 风格开关,见下方 `.switch` 说明)控制全局 `settings.holdSec` 是否 >0;展开秒数输入 `#hold-sec-wrap`(内含 `#cfg-hold`,范围 1-60,与 §3 一致)。关闭开关时记住上一次输入的秒数,重新打开不必再输一遍。holdSec 是**全局设置**而非 custom 的字段(见 §5)——四个预设与自定义方案共用同一个「维持」开关。
+
+**引导圆**:结构上 `#coach-ring`(相位环)与 `#coach-circle`(引导圆)是**兄弟节点**而非父子——圆要缩放、环必须保持固定尺寸,父子关系会让环跟着一起缩水。
+- `#coach-circle`:直径约 200px 的圆,内部上方 `#phase-label`(待开始/准备/收紧/维持/放松/休息/完成),中间大号 `#countdown`(当前阶段剩余秒,`Math.ceil(remainingInPhaseMs/1000)`;idle/done 态显示 `—`)。动画:CSS `transform: scale()` + `transition`,JS 在进入阶段时把 `transitionDuration` 设为该阶段秒数;`contract`/`hold` 缩到 0.62(维持阶段圆停在收紧到位的尺寸不动,靠内圈高光脉动表示"还在用力"),`relax`/`rest`/`prepare`/`idle`/`done` 回到 1。
+- `#coach-ring`:环绕引导圆的 `conic-gradient` 圆环,表示**当前阶段剩余时间比例**;JS 每 100ms(与 tick 同频)直接写 CSS 自定义属性 `--ring`(百分比数值),**不使用 CSS transition** ——暂停/切后台再切回时用 `remainingInPhaseMs` 重算的比例天然对得上,不会有过渡动画倒退或跳变。配色按用力程度排列;`hold` 阶段是唯一的暖色(琥珀)环 + 最深的墨绿圆,其余阶段为主色 teal 深浅变化。idle/done 态整个环淡出(`opacity:0`)。
+- 进度:`#set-progress`。运行中文案 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `准备好就开始`(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。总进度条 `#overall-bar`(宽度=overallProgress)。
+
+- 按钮:`#btn-start`(开始训练,done 态文案变为"再来一次")、`#btn-pause`(暂停/继续,文案随态切换)、`#btn-stop`(结束)。驱动:`setInterval` 100ms,`next = tick(state, Date.now())`;**阶段推进**(phase 或 setIndex/repIndex 任一变化——`restSec=0` 时跨组是 contract→contract,仅比较 phase 会漏一拍)时触发提示音/语音/震动 + 圆与环重新进入动画;done 时写入记录并展示完成面板 `#done-panel`。
 - `#btn-stop` 训练中点击 → `confirm('确定结束本次训练?')`;若 `completedReps>0` 以 `finished:false` 记录后 reset。
 - 记录写入:`makeRecord({ dateStr: localDateStr(new Date()), completedReps, totalReps: config.sets*config.repsPerSet, durationSec: Math.round((Date.now()-startedAt)/1000), finished })`,append 到 records 后 save。
-- 提示音:懒创建 AudioContext(**必须在 start 按钮的点击处理器里创建/resume**,规避自动播放限制);sine 波、gain 0.05:contract 880Hz 150ms、relax 523Hz 150ms、rest 392Hz、done 三连音 523/659/880。settings.sound 为 false 则跳过。
-- 震动:`navigator.vibrate` 存在且 settings.vibration 时,contract [100]、relax [50]、done [80,60,80]。
+
+**完成面板 `#done-panel`**(重做):
+- `#done-reps` 本次完成收缩次数、`#done-duration` 用时;
+- `#done-streak-num` 当前连续天数(**v1 的 `#done-streak` 已改名为 `#done-streak-num`**);
+- `#done-next-bar` 进度条(宽度 = 下一枚连续类徽章的 progress)+ `#done-next` 文案(如 `再连续 2 天解锁「一周不断」`;连续类徽章已全部解锁则显示对应完结文案);
+- `#done-unlocked`(本次新解锁徽章的外层容器,无解锁时 `hidden`)+ `#done-badges`(徽章行,新解锁徽章带弹出动画)。新解锁的判定:写入记录前后各取一次 `unlockedIds` 快照,`newlyUnlocked(before, after)` 求差集。
+
+**提示音**(方向性设计,关闭语音也能靠耳朵分辨该干什么):懒创建 AudioContext(**必须在 start 按钮的点击处理器里创建/resume**,规避自动播放限制);sine 波、gain 0.05:
+  - `prepare` 单音 587Hz;
+  - `contract` 上行 660→990Hz(提起来);
+  - `hold` 两声平音 784×2(稳住);
+  - `relax` 下行 784→523Hz(放下去);
+  - `rest` 低长音 392Hz(歇着);
+  - `done` 三连音 523/659/880Hz。
+  `settings.sound` 为 false 则跳过。
+
+**语音播报**:Web Speech API `speechSynthesis`,zh-CN,按阶段播报"准备/收紧/保持/放松/休息/完成"。`settings.voice` 控制开关,**默认关**——语音走扬声器外放,而本应用的典型使用场景(办公室、卫生间)多为公共/半公共环境;提示音本身已按方向可分辨,不开语音也能不看屏幕。**iOS 要求首次 `speak` 发生在用户手势里**,否则之后的播报被静默丢弃——`primeVoice()` 在开始按钮的点击处理器里跑一次 `volume:0` 的空白话来"开锁"。切阶段时先 `speechSynthesis.cancel()` 让位,避免播报堆积、落后于画面。
+
+**震动**:`navigator.vibrate` 存在且 `settings.vibration` 时,按阶段各不同的 pattern(contract/hold/relax/rest/done)。
+
 - 屏幕常亮:start 时 `navigator.wakeLock?.request('screen')` try/catch,done/stop 时 release。
-- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`:`#opt-sound`、`#opt-vibration`(checkbox),提醒 `#opt-reminder-enabled` + `<input type="time" id="opt-reminder-time">`,下方小字说明:`网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳`。开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
+- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`:`#opt-sound`、`#opt-voice`、`#opt-vibration`(均为 `.switch`),提醒 `#opt-reminder-enabled` + `<input type="time" id="opt-reminder-time">`,下方小字说明不开语音也能靠音高方向分辨阶段、以及语音开启后会外放需留意公共场合,和"网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳"。开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
+- `.switch`:v1 是原生 checkbox(iOS 上渲染成带蓝色聚焦框的方块勾,与整体视觉不搭);v2 改成 `appearance: none` 自绘的 iOS 风格开关(胶囊轨道 + 圆形滑块,`:checked` 切换位置与背景色)。
 
 ### 统计 tab
-- 顶部大数字 `#streak-num`(当前连续天数)+ 文案 `连续打卡`;
+- 顶部大数字 `#streak-num`(当前连续天数)+ 文案 `连续打卡` + `#today-goal`(今日目标达成状态,如 `今天已完成 1 次训练 ✓` / `今天还没练 · 完成 1 次就算打卡`);
+- **徽章墙**:卡片标题旁 `#badge-count`(`{unlockedCount} / {total}`,即 `x / 12`),`#badge-wall`(4 列 × 3 行网格,每枚徽章显示图标+名称,未解锁降低透明度,title 属性显示描述与差距),下方 `#next-badge`(离下一枚还差多少,如 `⚡ 距「一周不断」还差 2 天`;全部解锁则显示完结文案);
 - 四格指标:`#stat-days` 累计打卡天数(activeDays)、`#stat-sessions` 完成训练次数(finishedSessions)、`#stat-reps` 累计收缩次数、`#stat-duration` 累计时长(分钟,四舍五入);
 - `#heatmap`:`lastNDays(records, today, 35)` 渲染 7列×5行 grid,旧→新,按 finishedCount 0/1/2/≥3 四档由浅到深上色,最后一格(今天)加描边;
 - `#btn-export` 导出:`exportJSON` 生成 Blob 下载,文件名 `tigang-data.json`;`#btn-clear` 清除全部数据(confirm 二次确认)。
@@ -213,23 +329,54 @@ storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、
 
 页脚(所有 tab 可见区域底部、tab 栏上方):`仅供锻炼参考,不构成医疗建议`。
 
-## §8 PWA(sw.js + manifest.webmanifest + icon.svg)
+### §8.x DOM id 总表(app.js 实际引用的全部 57 个)
 
-- manifest:`name/short_name` 提肛陪伴,`start_url: "."`,`scope: "."`,`display: "standalone"`,`background_color: "#f6f8f7"`,`theme_color: "#0f9b8e"`,icons 单项 `{ src:"icon.svg", sizes:"any", type:"image/svg+xml", purpose:"any" }`。
-- icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。
-- sw.js:`CACHE_NAME='tigang-v1'`;install → `addAll` 预缓存全部 9 个静态文件(相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
+校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
+
+| 分区 | id |
+|---|---|
+| 顶栏 | `btn-settings` `streak-chip` `streak-chip-num` |
+| tab 与面板 | `tab-train` `tab-stats` `tab-knowledge` `panel-train` `panel-stats` `panel-knowledge` |
+| 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
+| 引导圆与进度 | `coach-ring` `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
+| 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
+| 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` |
+| 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-clear` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
+
+## §9 PWA(sw.js + manifest.webmanifest + icon.svg + icon-*.png)
+
+- manifest:`name/short_name` 提肛陪伴,`start_url: "."`,`scope: "."`,`display: "standalone"`,`background_color: "#f6f8f7"`,`theme_color: "#0f9b8e"`,icons 扩为 4 项:`icon.svg`(`sizes:"any"`,`purpose:"any"`)、`icon-192.png`、`icon-512.png`(均 `purpose:"any"`)、`icon-maskable-512.png`(`purpose:"maskable"`)。
+- icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
+- icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
+- index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
+- sw.js:`CACHE_NAME='tigang-v2'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
-## §9 验收清单(由主会话执行)
+## §10 验收清单(由主会话执行)
 
-1. `node --test tests/` 全绿;
+1. `npm test`(裸 `node --test`)全绿;
 2. 所有 JS 通过 `node --check`;manifest 可被 JSON.parse;
 3. app.js 引用的每个 DOM id 都存在于 index.html;sw.js 预缓存清单与磁盘文件一一对应;
 4. `python3 -m http.server` 下所有资源 200;
 5. 引擎状态机、streak 边界、自动播放/免打扰逻辑人工复核。
 
-## §10 v1 实现修订(验收后回写,规格已同步)
+## §11 v1 实现修订(验收后回写,规格已同步)
 
 - **测试命令**:Node 24 把 `node --test` 的位置参数当文件处理,`tests/` 目录参数报 `MODULE_NOT_FOUND` 并伪装成 1 个测试失败;`npm test` 已改为裸 `node --test`(递归发现 `tests/*.test.mjs`)。
-- **阶段推进判定**放宽为 phase/setIndex/repIndex 任一变化(修复 `restSec=0` 时 contract→contract 漏提示音,§7 已更新)。
+- **阶段推进判定**放宽为 phase/setIndex/repIndex 任一变化(修复 `restSec=0` 时 contract→contract 漏提示音,§8 已更新)。
 - 其余实现裁量(validateConfig 接受数值字符串、totals 的次数/时长包含未完成记录、`#countdown` 空态显示 `—`、暂停冻结圆动画等)见 DEVELOPMENT.md D10。
+
+## §12 v2 变更概述
+
+在 v1(SPEC v1,DEVELOPMENT D1-D11)基础上的一轮功能增量,代码先落地、本节为事后回写:
+
+1. **维持(hold)阶段**:engine.js 新增可选的三段式(收紧→维持→放松),`holdSec=0` 默认关闭、完全等价于 v1 两段式;`holdSec` 是全局设置(storage.js),不进 custom,叠加在任意方案之上。
+2. **成就系统**:新增 `core/achievements.js`——12 枚徽章 + 今日目标,纯函数,连续类徽章看历史最长连续(`bestStreak`)而非当前连续,断档不收回徽章。`core/stats.js` 新增 `longestStreak`。
+3. **语音播报**与**方向性提示音**:`speechSynthesis` 播报阶段名,**默认关**(外放,顾及公共场合);提示音按阶段做出上行/下行/平音/长音的区分,所以不开语音也能靠耳朵分辨该干什么。均需在用户手势(开始按钮点击)中完成首次初始化(iOS 限制)。
+4. **UI 单屏化与重做**:方案卡默认折叠;新增相位环 `#coach-ring`;顶栏常驻连续天数芯片;统计页新增徽章墙;完成面板重做(`#done-streak` 改名 `#done-streak-num`);设置开关从原生 checkbox 换成自绘 `.switch`;布局改 flex + `min-height: calc(100dvh - …)` 保证单屏不滚动。
+5. **应用图标**:新增 `tools/make-icons.mjs` 零依赖手写 PNG 编码器,生成 4 个尺寸的图标并提交进仓库,解决 iOS 主屏图标退化成文字缩写的问题。
+6. **sw.js**:`CACHE_NAME` 升到 `tigang-v2`,预缓存清单加 `core/achievements.js` 与 4 个图标 PNG。
+
+详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起。

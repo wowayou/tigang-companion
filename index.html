@@ -11,7 +11,7 @@
   <title>提肛陪伴</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
-  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -20,6 +20,9 @@
 
     <header class="app-header">
       <h1 class="app-title">提肛陪伴</h1>
+      <span class="streak-chip" id="streak-chip" hidden title="当前连续打卡天数">
+        <span aria-hidden="true">🔥</span><b id="streak-chip-num">0</b><span class="streak-chip-unit">天</span>
+      </span>
       <button type="button" id="btn-settings" class="icon-btn" aria-label="设置" title="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="3.2"></circle>
@@ -33,58 +36,83 @@
       <!-- ======================= 训练 ======================= -->
       <section class="panel" id="panel-train" role="tabpanel" aria-labelledby="tab-train">
 
-        <div class="card">
-          <h2 class="card-title">选择方案</h2>
-          <div class="pills" role="radiogroup" aria-label="训练方案">
-            <label class="pill">
-              <input type="radio" name="preset" value="beginner" id="preset-beginner">
-              <span>新手入门</span>
-            </label>
-            <label class="pill">
-              <input type="radio" name="preset" value="standard" id="preset-standard" checked>
-              <span>标准训练</span>
-            </label>
-            <label class="pill">
-              <input type="radio" name="preset" value="advanced" id="preset-advanced">
-              <span>进阶耐力</span>
-            </label>
-            <label class="pill">
-              <input type="radio" name="preset" value="quick" id="preset-quick">
-              <span>快速爆发</span>
-            </label>
-            <label class="pill">
-              <input type="radio" name="preset" value="custom" id="preset-custom">
-              <span>自定义</span>
-            </label>
-          </div>
+        <div class="card plan-card">
+          <button type="button" class="plan-head" id="plan-toggle" aria-expanded="false" aria-controls="plan-body">
+            <span class="plan-head-text">
+              <span class="plan-name" id="plan-name">标准训练</span>
+              <span class="plan-summary" id="plan-summary"></span>
+            </span>
+            <svg class="plan-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 9.5 12 15.5 18 9.5"></path>
+            </svg>
+          </button>
 
-          <div class="custom-panel" id="custom-panel" hidden>
-            <div class="field">
-              <label for="cfg-contract">收缩(秒)</label>
-              <input type="number" id="cfg-contract" min="1" max="30" step="1" inputmode="numeric">
+          <div class="plan-body" id="plan-body" hidden>
+            <div class="pills" role="radiogroup" aria-label="训练方案">
+              <label class="pill">
+                <input type="radio" name="preset" value="beginner" id="preset-beginner">
+                <span>新手入门</span>
+              </label>
+              <label class="pill">
+                <input type="radio" name="preset" value="standard" id="preset-standard" checked>
+                <span>标准训练</span>
+              </label>
+              <label class="pill">
+                <input type="radio" name="preset" value="advanced" id="preset-advanced">
+                <span>进阶耐力</span>
+              </label>
+              <label class="pill">
+                <input type="radio" name="preset" value="quick" id="preset-quick">
+                <span>快速爆发</span>
+              </label>
+              <label class="pill">
+                <input type="radio" name="preset" value="custom" id="preset-custom">
+                <span>自定义</span>
+              </label>
             </div>
-            <div class="field">
-              <label for="cfg-relax">放松(秒)</label>
-              <input type="number" id="cfg-relax" min="1" max="30" step="1" inputmode="numeric">
+
+            <div class="custom-panel" id="custom-panel" hidden>
+              <div class="field">
+                <label for="cfg-contract">收缩(秒)</label>
+                <input type="number" id="cfg-contract" min="1" max="30" step="1" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="cfg-relax">放松(秒)</label>
+                <input type="number" id="cfg-relax" min="1" max="30" step="1" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="cfg-reps">每组次数</label>
+                <input type="number" id="cfg-reps" min="1" max="50" step="1" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="cfg-sets">组数</label>
+                <input type="number" id="cfg-sets" min="1" max="10" step="1" inputmode="numeric">
+              </div>
+              <div class="field">
+                <label for="cfg-rest">组间休息(秒)</label>
+                <input type="number" id="cfg-rest" min="0" max="180" step="1" inputmode="numeric">
+              </div>
             </div>
-            <div class="field">
-              <label for="cfg-reps">每组次数</label>
-              <input type="number" id="cfg-reps" min="1" max="50" step="1" inputmode="numeric">
-            </div>
-            <div class="field">
-              <label for="cfg-sets">组数</label>
-              <input type="number" id="cfg-sets" min="1" max="10" step="1" inputmode="numeric">
-            </div>
-            <div class="field">
-              <label for="cfg-rest">组间休息(秒)</label>
-              <input type="number" id="cfg-rest" min="0" max="180" step="1" inputmode="numeric">
+
+            <div class="hold-block">
+              <label class="hold-row" for="opt-hold-enabled">
+                <span class="opt-text">维持阶段</span>
+                <input type="checkbox" id="opt-hold-enabled" class="switch">
+              </label>
+              <div class="hold-sec" id="hold-sec-wrap" hidden>
+                <label for="cfg-hold">维持时长</label>
+                <span class="hold-sec-input">
+                  <input type="number" id="cfg-hold" min="1" max="60" step="1" inputmode="numeric" value="5">
+                  <span>秒</span>
+                </span>
+              </div>
+              <p class="hint">开启后每次循环变成 收紧 → 维持 → 放松 三段,对所有方案都生效。</p>
             </div>
           </div>
-
-          <p class="plan-summary" id="plan-summary"></p>
         </div>
 
         <div class="coach">
+          <div class="coach-ring" id="coach-ring" data-phase="idle" aria-hidden="true"></div>
           <div class="coach-circle" id="coach-circle" data-phase="idle">
             <span class="phase-label" id="phase-label" aria-live="polite">待开始</span>
             <span class="countdown" id="countdown" aria-hidden="true">—</span>
@@ -105,11 +133,18 @@
 
         <div class="card done-panel" id="done-panel" hidden>
           <h2 class="done-title">本次训练完成</h2>
-          <ul class="done-list">
-            <li>完成 <strong id="done-reps">0</strong> 次收缩</li>
-            <li>用时 <strong id="done-duration">0 秒</strong></li>
-            <li>当前连续 <strong id="done-streak">0</strong> 天</li>
-          </ul>
+          <p class="done-line">完成 <strong id="done-reps">0</strong> 次收缩 · 用时 <strong id="done-duration">0 秒</strong></p>
+
+          <div class="done-streak">
+            <span class="done-streak-head">🔥 连续 <strong id="done-streak-num">0</strong> 天</span>
+            <div class="mini-track"><div class="mini-bar" id="done-next-bar"></div></div>
+            <span class="done-next" id="done-next"></span>
+          </div>
+
+          <div class="done-unlocked" id="done-unlocked" hidden>
+            <p class="done-unlocked-title">解锁新徽章</p>
+            <div class="badge-row" id="done-badges"></div>
+          </div>
         </div>
 
       </section>
@@ -120,6 +155,16 @@
         <div class="card streak-card">
           <div class="streak-num" id="streak-num">0</div>
           <div class="streak-label">连续打卡</div>
+          <p class="today-goal" id="today-goal"></p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title">徽章</h2>
+            <span class="badge-count" id="badge-count">0 / 12</span>
+          </div>
+          <div class="badge-wall" id="badge-wall"></div>
+          <p class="next-badge" id="next-badge"></p>
         </div>
 
         <div class="stat-grid">
@@ -243,6 +288,11 @@
     </label>
 
     <label class="opt-row">
+      <span class="opt-text">语音播报</span>
+      <input type="checkbox" id="opt-voice" class="switch">
+    </label>
+
+    <label class="opt-row">
       <span class="opt-text">震动</span>
       <input type="checkbox" id="opt-vibration" class="switch">
     </label>
@@ -257,6 +307,7 @@
       <input type="time" id="opt-reminder-time" class="time-input" value="21:00">
     </label>
 
+    <p class="hint">不开语音也能不看屏幕:收紧是上行音、维持是双平音、放松是下行音。语音开启后会通过扬声器外放,公共场合留意。</p>
     <p class="hint">网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳</p>
 
     <form method="dialog" class="dlg-actions">

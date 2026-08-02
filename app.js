@@ -17,6 +17,7 @@ import {
   overallProgress,
 } from './core/engine.js';
 import { localDateStr, makeRecord, computeStreak, totals, lastNDays } from './core/stats.js';
+import { evaluate, unlockedIds, newlyUnlocked, dailyGoal } from './core/achievements.js';
 import { load, save, clearAll, exportJSON } from './core/storage.js';
 
 /* ------------------------------------------------------------------ *
@@ -27,6 +28,8 @@ const $ = (id) => document.getElementById(id);
 
 const el = {
   btnSettings: $('btn-settings'),
+  streakChip: $('streak-chip'),
+  streakChipNum: $('streak-chip-num'),
 
   tabTrain: $('tab-train'),
   tabStats: $('tab-stats'),
@@ -35,14 +38,21 @@ const el = {
   panelStats: $('panel-stats'),
   panelKnowledge: $('panel-knowledge'),
 
+  planToggle: $('plan-toggle'),
+  planBody: $('plan-body'),
+  planName: $('plan-name'),
+  planSummary: $('plan-summary'),
   customPanel: $('custom-panel'),
   cfgContract: $('cfg-contract'),
   cfgRelax: $('cfg-relax'),
   cfgReps: $('cfg-reps'),
   cfgSets: $('cfg-sets'),
   cfgRest: $('cfg-rest'),
-  planSummary: $('plan-summary'),
+  optHoldEnabled: $('opt-hold-enabled'),
+  holdSecWrap: $('hold-sec-wrap'),
+  cfgHold: $('cfg-hold'),
 
+  coachRing: $('coach-ring'),
   coachCircle: $('coach-circle'),
   phaseLabel: $('phase-label'),
   countdown: $('countdown'),
@@ -56,9 +66,17 @@ const el = {
   donePanel: $('done-panel'),
   doneReps: $('done-reps'),
   doneDuration: $('done-duration'),
-  doneStreak: $('done-streak'),
+  doneStreakNum: $('done-streak-num'),
+  doneNextBar: $('done-next-bar'),
+  doneNext: $('done-next'),
+  doneUnlocked: $('done-unlocked'),
+  doneBadges: $('done-badges'),
 
   streakNum: $('streak-num'),
+  todayGoal: $('today-goal'),
+  badgeWall: $('badge-wall'),
+  badgeCount: $('badge-count'),
+  nextBadge: $('next-badge'),
   statDays: $('stat-days'),
   statSessions: $('stat-sessions'),
   statReps: $('stat-reps'),
@@ -69,6 +87,7 @@ const el = {
 
   dlgSettings: $('dlg-settings'),
   optSound: $('opt-sound'),
+  optVoice: $('opt-voice'),
   optVibration: $('opt-vibration'),
   optReminderEnabled: $('opt-reminder-enabled'),
   optReminderTime: $('opt-reminder-time'),
@@ -80,14 +99,33 @@ const customInputs = [el.cfgContract, el.cfgRelax, el.cfgReps, el.cfgSets, el.cf
 const PHASE_LABEL = {
   idle: '待开始',
   prepare: '准备',
-  contract: '收缩',
+  contract: '收紧',
+  hold: '维持',
   relax: '放松',
   rest: '休息',
   done: '完成',
 };
 
+/** 语音播报文本;刻意用短词,免得念不完就换阶段了。 */
+const PHASE_SPEECH = {
+  prepare: '准备',
+  contract: '收紧',
+  hold: '保持',
+  relax: '放松',
+  rest: '休息',
+  done: '完成',
+};
+
+const METRIC_UNIT = {
+  bestStreak: '天',
+  activeDays: '天',
+  totalReps: '次收缩',
+  finishedSessions: '次训练',
+};
+
 const TICK_MS = 100;
 const HEATMAP_DAYS = 35;
+const DEFAULT_HOLD_SEC = 5;
 
 /* ------------------------------------------------------------------ *
  * 运行时状态
@@ -99,17 +137,28 @@ let timerId = null;
 let audioCtx = null;
 let wakeLock = null;
 let reminderTimer = null;
+let voicePrimed = false;
+// 关掉「维持」开关时记住上次的秒数,再打开时不用重新输
+let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
+// 空闲态那行提示里要显示连续天数,但 renderTrain 每 100ms 跑一次,不能每次都去算统计
+let idleHintText = '';
 
 /* ------------------------------------------------------------------ *
  * 小工具
  * ------------------------------------------------------------------ */
 
+/**
+ * 当前生效的训练配置。
+ * holdSec 是全局设置,叠加在任何方案(含 custom)之上 —— 只有一个地方能改「维持」。
+ */
 function resolveConfig() {
   const key = data.settings.presetKey;
-  if (key === 'custom') return { ...data.settings.custom };
+  const holdSec = data.settings.holdSec;
+  if (key === 'custom') return { ...data.settings.custom, holdSec };
   const preset = PRESETS[key] || PRESETS.standard;
   return {
     contractSec: preset.contractSec,
+    holdSec,
     relaxSec: preset.relaxSec,
     repsPerSet: preset.repsPerSet,
     sets: preset.sets,
@@ -180,21 +229,85 @@ function vibrate(pattern) {
   }
 }
 
-function cueFor(phase) {
-  if (phase === 'contract') {
-    beep(880, 150);
-    vibrate([100]);
-  } else if (phase === 'relax') {
-    beep(523, 150);
-    vibrate([50]);
-  } else if (phase === 'rest') {
-    beep(392, 150);
-  } else if (phase === 'done') {
-    beep(523, 150, 0);
-    beep(659, 150, 0.18);
-    beep(880, 220, 0.36);
-    vibrate([80, 60, 80]);
+/**
+ * 提示音刻意做成有「方向」的:上行=提起来,下行=放下去,平音=稳住,低长音=歇着。
+ * 这样即使关掉语音(公共场合),不看屏幕也分得出该干什么。
+ */
+const TONES = {
+  prepare:  () => { beep(587, 130); },
+  contract: () => { beep(660, 110); beep(990, 160, 0.10); },   // 上行
+  hold:     () => { beep(784, 90);  beep(784, 90, 0.15); },    // 两声平音
+  relax:    () => { beep(784, 110); beep(523, 180, 0.10); },   // 下行
+  rest:     () => { beep(392, 240); },                          // 低长音
+  done:     () => { beep(523, 150); beep(659, 150, 0.18); beep(880, 220, 0.36); },
+};
+
+const VIBRATIONS = {
+  contract: [90],
+  hold: [40, 70, 40],
+  relax: [50],
+  rest: [30, 60, 30],
+  done: [80, 60, 80],
+};
+
+/**
+ * iOS 要求 speechSynthesis 的第一次 speak 发生在用户手势里,否则之后的播报会被静默丢弃。
+ * 用一句静音的空白话在开始按钮里「开锁」。
+ */
+function primeVoice() {
+  if (voicePrimed || !('speechSynthesis' in window)) return;
+  try {
+    const u = new SpeechSynthesisUtterance(' ');
+    u.volume = 0;
+    u.lang = 'zh-CN';
+    window.speechSynthesis.speak(u);
+    voicePrimed = true;
+  } catch {
+    voicePrimed = false;
   }
+}
+
+function speak(phase) {
+  if (!data.settings.voice) return;
+  if (!('speechSynthesis' in window)) return;
+  const text = PHASE_SPEECH[phase];
+  if (!text) return;
+  try {
+    const synth = window.speechSynthesis;
+    // 上一句还没念完就换阶段时立刻让位,免得播报落后于画面
+    if (synth.speaking || synth.pending) synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'zh-CN';
+    u.rate = 1.05;
+    u.volume = 0.9;
+    // cancel() 之后同步 speak() 在部分引擎上会把播报队列卡死,退一个宏任务再说
+    setTimeout(() => {
+      try {
+        synth.speak(u);
+      } catch {
+        /* 忽略 */
+      }
+    }, 0);
+  } catch {
+    /* 语音不可用时静默忽略,提示音仍在 */
+  }
+}
+
+function stopSpeaking() {
+  if (!('speechSynthesis' in window)) return;
+  try {
+    window.speechSynthesis.cancel();
+  } catch {
+    /* 忽略 */
+  }
+}
+
+function cueFor(phase) {
+  const tone = TONES[phase];
+  if (tone) tone();
+  const pattern = VIBRATIONS[phase];
+  if (pattern) vibrate(pattern);
+  speak(phase);
 }
 
 async function requestWakeLock() {
@@ -220,15 +333,17 @@ function releaseWakeLock() {
  * 引导圆动画
  * ------------------------------------------------------------------ */
 
+/** 维持阶段停在收缩到位的尺寸上 —— 「已经提上去了,现在别松」。 */
 function targetScale(phase) {
-  return phase === 'contract' ? 0.62 : 1;
+  return phase === 'contract' || phase === 'hold' ? 0.62 : 1;
 }
 
-/** 进入某阶段:transitionDuration = 该阶段(剩余)秒数,收缩缩到 0.62。 */
+/** 进入某阶段:transitionDuration = 该阶段(剩余)秒数,收紧/维持停在 0.62。 */
 function animateCircle(phase, durationSec) {
   const circle = el.coachCircle;
   circle.dataset.phase = phase;
-  circle.classList.toggle('is-pulsing', phase === 'prepare' || phase === 'rest');
+  // 维持期间圆不动,靠内圈高光的脉动表示「还在用力」
+  circle.classList.toggle('is-pulsing', phase === 'hold');
   circle.classList.remove('is-paused');
   circle.style.transitionDuration = `${Math.max(0, durationSec)}s`;
   circle.style.transform = `scale(${targetScale(phase)})`;
@@ -264,10 +379,50 @@ function syncCircleToRemaining(state) {
 
 function renderPlanSummary() {
   const c = session.config;
-  const total = totalDurationSec(c);
+  const key = data.settings.presetKey;
+  el.planName.textContent = key === 'custom' ? '自定义' : (PRESETS[key] || PRESETS.standard).name;
+  // 开了维持才叫「收紧」(三段里的第一段),否则沿用「收缩」
+  const first = c.holdSec > 0 ? `收紧 ${c.contractSec}s · 维持 ${c.holdSec}s` : `收缩 ${c.contractSec}s`;
   el.planSummary.textContent =
-    `收缩 ${c.contractSec}s · 放松 ${c.relaxSec}s · ${c.repsPerSet} 次 × ${c.sets} 组` +
-    `${c.restSec > 0 ? ` · 组间休息 ${c.restSec}s` : ''} · 全程约 ${formatDuration(total)}`;
+    `${first} · 放松 ${c.relaxSec}s · ${c.repsPerSet} 次 × ${c.sets} 组 · 约 ${formatDuration(totalDurationSec(c))}`;
+}
+
+function setPlanOpen(open) {
+  el.planBody.hidden = !open;
+  el.planToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+/** 空闲态那行文字:与其空着,不如告诉用户「今天练没练」。 */
+function refreshIdleHint(today = localDateStr(new Date())) {
+  const goal = dailyGoal(data.records, today);
+  const streak = computeStreak(data.records, today);
+  if (goal.met) {
+    idleHintText = streak > 0 ? `今天已完成 · 连续 ${streak} 天` : '今天已完成';
+  } else if (streak > 0) {
+    idleHintText = `连续 ${streak} 天 · 今天还没练`;
+  } else {
+    idleHintText = '准备好就开始';
+  }
+}
+
+function badgeEl(badge) {
+  const node = document.createElement('div');
+  node.className = 'badge';
+  node.dataset.unlocked = badge.unlocked ? 'true' : 'false';
+  node.title = badge.unlocked
+    ? `${badge.name} · ${badge.desc} · 已解锁`
+    : `${badge.name} · ${badge.desc} · 还差 ${badge.remaining}`;
+
+  const icon = document.createElement('span');
+  icon.className = 'badge-icon';
+  icon.textContent = badge.icon;
+
+  const name = document.createElement('span');
+  name.className = 'badge-name';
+  name.textContent = badge.name;
+
+  node.append(icon, name);
+  return node;
 }
 
 function renderTrain() {
@@ -283,30 +438,60 @@ function renderTrain() {
     el.countdown.textContent = String(Math.max(0, Math.ceil(remainingInPhaseMs(s, now) / 1000)));
   }
 
-  el.setProgress.textContent =
-    s.phase === 'rest'
-      ? `休息中 · 即将开始第 ${s.setIndex + 1} 组`
-      : `第 ${s.setIndex + 1}/${c.sets} 组 · 第 ${s.repIndex + 1}/${c.repsPerSet} 次`;
+  const running = isRunning(s);
+
+  if (!running) {
+    el.setProgress.textContent = idleHintText;
+  } else if (s.phase === 'rest') {
+    el.setProgress.textContent = `休息中 · 即将开始第 ${s.setIndex + 1} 组`;
+  } else {
+    el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 第 ${s.repIndex + 1}/${c.repsPerSet} 次`;
+  }
+
+  // 相位环 = 当前阶段剩余比例,逐帧写入(不用 CSS 过渡,暂停/后台切回时天然对得上)
+  const phaseMs = phaseDurationSec(c, s.phase) * 1000;
+  const ringPct = running && phaseMs > 0 ? (remainingInPhaseMs(s, now) / phaseMs) * 100 : 0;
+  el.coachRing.dataset.phase = s.phase;
+  el.coachRing.style.setProperty('--ring', ringPct.toFixed(1));
 
   const pct = Math.min(100, Math.max(0, overallProgress(s, now) * 100));
   el.overallBar.style.width = `${pct.toFixed(2)}%`;
 
-  const running = isRunning(s);
   el.btnStart.disabled = running;
   el.btnStart.textContent = s.phase === 'done' ? '再来一次' : '开始训练';
   el.btnPause.disabled = !running;
   el.btnPause.textContent = s.paused ? '继续' : '暂停';
   el.btnStop.disabled = !running;
 
+  // 训练中锁住方案:改配置会重置会话,等于白练
+  el.planToggle.disabled = running;
+  if (running && !el.planBody.hidden) setPlanOpen(false);
   presetRadios.forEach((r) => { r.disabled = running; });
   customInputs.forEach((i) => { i.disabled = running; });
+  el.optHoldEnabled.disabled = running;
+  el.cfgHold.disabled = running;
 }
 
 function renderStats() {
   const today = localDateStr(new Date());
   const t = totals(data.records);
+  const streak = computeStreak(data.records, today);
 
-  el.streakNum.textContent = String(computeStreak(data.records, today));
+  el.streakNum.textContent = String(streak);
+
+  // 顶栏火苗:0 天时不显示,免得空着反而像在提醒你失败了
+  el.streakChip.hidden = streak <= 0;
+  el.streakChipNum.textContent = String(streak);
+
+  const goal = dailyGoal(data.records, today);
+  el.todayGoal.dataset.met = String(goal.met);
+  el.todayGoal.textContent = goal.met
+    ? `今天已完成 ${goal.done} 次训练 ✓`
+    : '今天还没练 · 完成 1 次就算打卡';
+
+  renderBadges(today);
+  refreshIdleHint(today);
+
   el.statDays.textContent = String(t.activeDays);
   el.statSessions.textContent = String(t.finishedSessions);
   el.statReps.textContent = String(t.totalReps);
@@ -326,8 +511,31 @@ function renderStats() {
   el.heatmap.appendChild(frag);
 }
 
+function renderBadges(today) {
+  const ev = evaluate(data.records, today);
+
+  el.badgeCount.textContent = `${ev.unlockedCount} / ${ev.total}`;
+
+  const frag = document.createDocumentFragment();
+  for (const badge of ev.badges) frag.appendChild(badgeEl(badge));
+  el.badgeWall.textContent = '';
+  el.badgeWall.appendChild(frag);
+
+  if (!ev.next) {
+    el.nextBadge.textContent = '12 枚徽章全部解锁 —— 你已经把这件事变成习惯了。';
+    return;
+  }
+  const unit = METRIC_UNIT[ev.next.metric] || '';
+  el.nextBadge.textContent = '';
+  el.nextBadge.append(
+    `${ev.next.icon} 距「${ev.next.name}」还差 `,
+    Object.assign(document.createElement('strong'), { textContent: `${ev.next.remaining} ${unit}` }),
+  );
+}
+
 function renderSettingsForm() {
   el.optSound.checked = !!data.settings.sound;
+  el.optVoice.checked = !!data.settings.voice;
   el.optVibration.checked = !!data.settings.vibration;
   el.optReminderEnabled.checked = !!data.settings.reminder.enabled;
   el.optReminderTime.value = data.settings.reminder.time || '21:00';
@@ -343,6 +551,11 @@ function renderPresetForm() {
   el.cfgReps.value = String(custom.repsPerSet);
   el.cfgSets.value = String(custom.sets);
   el.cfgRest.value = String(custom.restSec);
+
+  const holdOn = data.settings.holdSec > 0;
+  el.optHoldEnabled.checked = holdOn;
+  el.holdSecWrap.hidden = !holdOn;
+  el.cfgHold.value = String(holdOn ? data.settings.holdSec : lastHoldSec);
 }
 
 /* ------------------------------------------------------------------ *
@@ -400,11 +613,40 @@ function writeRecord(state, finished) {
 
 function finishSession() {
   releaseWakeLock();
+  const today = localDateStr(new Date());
+
+  // 徽章解锁要在写入记录「前后」各取一次快照才比得出来
+  const before = unlockedIds(data.records, today);
   const record = writeRecord(session, true);
+  const gained = newlyUnlocked(before, unlockedIds(data.records, today));
+
   el.doneReps.textContent = String(record.completedReps);
   el.doneDuration.textContent = formatDuration(record.durationSec);
-  el.doneStreak.textContent = String(computeStreak(data.records, localDateStr(new Date())));
+
+  const ev = evaluate(data.records, today);
+  el.doneStreakNum.textContent = String(ev.metrics.streak);
+
+  // 完成的这一刻最容易被「再来一天就解锁」推着走,所以把下一枚连续徽章摆在这里
+  const nextStreak = ev.nextByMetric.bestStreak;
+  if (nextStreak) {
+    el.doneNextBar.style.width = `${(nextStreak.progress * 100).toFixed(1)}%`;
+    el.doneNext.textContent = `再连续 ${nextStreak.remaining} 天解锁「${nextStreak.name}」`;
+  } else {
+    el.doneNextBar.style.width = '100%';
+    el.doneNext.textContent = '连续打卡徽章已全部拿下。';
+  }
+
+  el.doneBadges.textContent = '';
+  if (gained.length > 0) {
+    for (const badge of gained) el.doneBadges.appendChild(badgeEl({ ...badge, unlocked: true }));
+    el.doneUnlocked.hidden = false;
+  } else {
+    el.doneUnlocked.hidden = true;
+  }
+
   el.donePanel.hidden = false;
+  // 用 center 而不是 nearest:底部 tab 栏是固定层,贴底对齐会把新解锁的徽章压在它下面
+  el.donePanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function resetSession() {
@@ -421,9 +663,16 @@ function resetSession() {
  * 事件:训练控制
  * ------------------------------------------------------------------ */
 
+el.planToggle.addEventListener('click', () => {
+  if (el.planToggle.disabled) return;
+  setPlanOpen(el.planBody.hidden);
+});
+
 el.btnStart.addEventListener('click', () => {
-  // 自动播放限制:AudioContext 必须在这个点击处理器里创建/resume。
+  // 自动播放限制:AudioContext 与 speechSynthesis 都必须在这个点击处理器里开锁。
   ensureAudioContext();
+  primeVoice();
+  setPlanOpen(false);
 
   if (session.phase === 'done') {
     session = reset(session);
@@ -449,6 +698,7 @@ el.btnPause.addEventListener('click', () => {
     session = pause(session, now);
     if (session.paused) {
       stopLoop();
+      stopSpeaking();
       freezeCircle();
     }
   }
@@ -459,8 +709,32 @@ el.btnStop.addEventListener('click', () => {
   if (!isRunning(session)) return;
   if (!window.confirm('确定结束本次训练?')) return;
   stopLoop();
+  stopSpeaking();
   if (session.completedReps > 0) writeRecord(session, false);
   resetSession();
+});
+
+/* ------------------------------------------------------------------ *
+ * 事件:维持阶段
+ * ------------------------------------------------------------------ */
+
+function applyHoldSec(sec) {
+  data.settings.holdSec = sec;
+  persist();
+  renderPresetForm();
+  resetSession();
+}
+
+el.optHoldEnabled.addEventListener('change', () => {
+  applyHoldSec(el.optHoldEnabled.checked ? lastHoldSec : 0);
+});
+
+el.cfgHold.addEventListener('change', () => {
+  // 与 engine 的 holdSec 范围保持一致(1-60);留空/非法回落到上一次的值
+  const raw = el.cfgHold.valueAsNumber;
+  const sec = Number.isFinite(raw) ? Math.min(60, Math.max(1, Math.round(raw))) : lastHoldSec;
+  lastHoldSec = sec;
+  applyHoldSec(el.optHoldEnabled.checked ? sec : 0);
 });
 
 /* ------------------------------------------------------------------ *
@@ -479,7 +753,8 @@ presetRadios.forEach((radio) => {
 
 customInputs.forEach((input) => {
   input.addEventListener('change', () => {
-    data.settings.custom = validateConfig({
+    // holdSec 是全局设置,不进 custom —— 否则同一个概念会有两份真相
+    const { holdSec, ...custom } = validateConfig({
       contractSec: el.cfgContract.valueAsNumber,
       relaxSec: el.cfgRelax.valueAsNumber,
       repsPerSet: el.cfgReps.valueAsNumber,
@@ -487,6 +762,7 @@ customInputs.forEach((input) => {
       restSec: el.cfgRest.valueAsNumber,
       prepareSec: data.settings.custom.prepareSec,
     });
+    data.settings.custom = custom;
     persist();
     renderPresetForm();
     if (data.settings.presetKey === 'custom') resetSession();
@@ -531,6 +807,13 @@ el.btnSettings.addEventListener('click', () => {
 el.optSound.addEventListener('change', () => {
   data.settings.sound = el.optSound.checked;
   persist();
+});
+
+el.optVoice.addEventListener('change', () => {
+  data.settings.voice = el.optVoice.checked;
+  persist();
+  if (data.settings.voice) primeVoice();
+  else stopSpeaking();
 });
 
 el.optVibration.addEventListener('change', () => {
@@ -626,6 +909,7 @@ el.btnClear.addEventListener('click', () => {
   if (!window.confirm('确定清除全部数据?打卡记录与设置都会被删除,且无法恢复。')) return;
   clearAll();
   data = load();
+  lastHoldSec = DEFAULT_HOLD_SEC;
   renderPresetForm();
   renderSettingsForm();
   scheduleReminder();
@@ -648,12 +932,13 @@ document.addEventListener('visibilitychange', () => {
  * 初始化
  * ------------------------------------------------------------------ */
 
+setPlanOpen(false);
 renderPresetForm();
 renderSettingsForm();
 enterPhaseVisual(session);
 renderPlanSummary();
+renderStats();   // 先算统计:renderTrain 空闲态那行要用 idleHintText
 renderTrain();
-renderStats();
 scheduleReminder();
 
 /* ------------------------------------------------------------------ *

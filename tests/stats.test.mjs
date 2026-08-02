@@ -8,6 +8,7 @@ import {
   computeStreak,
   totals,
   lastNDays,
+  longestStreak,
 } from '../core/stats.js';
 
 const rec = (dateStr, opts = {}) =>
@@ -177,4 +178,65 @@ test('lastNDays:空日补零、当天多条聚合、区间外记录不计', () =
   const cross = lastNDays([rec('2026-07-31', { completedReps: 7 })], '2026-08-02', 3);
   assert.deepEqual(cross.map((d) => d.dateStr), ['2026-07-31', '2026-08-01', '2026-08-02']);
   assert.equal(cross[0].reps, 7);
+});
+
+test('longestStreak:空数组 / 全是 finished:false → 0', () => {
+  assert.equal(longestStreak([]), 0);
+  assert.equal(longestStreak(undefined), 0);
+  assert.equal(longestStreak(null), 0);
+  const allUnfinished = [
+    rec('2026-08-01', { finished: false }),
+    rec('2026-08-02', { finished: false }),
+  ];
+  assert.equal(longestStreak(allUnfinished), 0);
+});
+
+test('longestStreak:单天 → 1', () => {
+  assert.equal(longestStreak([rec('2026-08-01')]), 1);
+});
+
+test('longestStreak:连续 3 天 → 3', () => {
+  const records = ['2026-08-01', '2026-08-02', '2026-08-03'].map((d) => rec(d));
+  assert.equal(longestStreak(records), 3);
+});
+
+test('longestStreak:有断档时取最长的一段', () => {
+  // 5 天一段(07-01..07-05) + 断档 + 2 天一段(07-10..07-11) → 最长 5
+  const records = [
+    '2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05',
+    '2026-07-10', '2026-07-11',
+  ].map((d) => rec(d));
+  assert.equal(longestStreak(records), 5);
+});
+
+test('longestStreak:同一天多条记录不重复计数', () => {
+  const records = [
+    rec('2026-08-01'),
+    rec('2026-08-01'),
+    rec('2026-08-02'),
+    rec('2026-08-02'),
+    rec('2026-08-02'),
+  ];
+  assert.equal(longestStreak(records), 2);
+});
+
+test('longestStreak:跨月、跨年边界连续 3 天', () => {
+  const records = ['2025-12-30', '2025-12-31', '2026-01-01'].map((d) => rec(d));
+  assert.equal(longestStreak(records), 3);
+});
+
+test('longestStreak:记录顺序打乱后结果不变(函数内部排序)', () => {
+  const inOrder = ['2026-07-01', '2026-07-02', '2026-07-03', '2026-07-04', '2026-07-05'].map((d) => rec(d));
+  const shuffled = [inOrder[3], inOrder[0], inOrder[4], inOrder[1], inOrder[2]];
+  assert.equal(longestStreak(shuffled), 5);
+});
+
+test('longestStreak 与 computeStreak 的区别:历史连续过、现在已断档很久', () => {
+  // 2026-01 月连续打卡 7 天,之后再无记录;"今天"是 2026-08-02,早已断档
+  const records = [
+    '2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04',
+    '2026-01-05', '2026-01-06', '2026-01-07',
+  ].map((d) => rec(d));
+  assert.equal(computeStreak(records, '2026-08-02'), 0);
+  assert.equal(longestStreak(records), 7);
 });

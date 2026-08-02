@@ -35,10 +35,33 @@ test('STORAGE_KEY 与 DEFAULT_SETTINGS 契约', () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     presetKey: 'standard',
     custom: { contractSec: 5, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
+    holdSec: 0,
     sound: true,
+    voice: false,
     vibration: true,
     reminder: { enabled: false, time: '21:00' },
   });
+});
+
+test('v1 存档(无 holdSec/voice)升级后拿到新默认键,且不改变已有取值', () => {
+  const v1Raw = JSON.stringify({
+    records: [{ dateStr: '2026-01-01', completedReps: 12, totalReps: 36, durationSec: 200, finished: true }],
+    settings: {
+      presetKey: 'advanced',
+      custom: { contractSec: 5, relaxSec: 5, repsPerSet: 12, sets: 3, restSec: 30, prepareSec: 3 },
+      sound: false,
+      vibration: true,
+      reminder: { enabled: true, time: '07:30' },
+    },
+  });
+  const loaded = load(fakeStorage(v1Raw));
+  assert.equal(loaded.settings.holdSec, 0, '老用户默认不启用维持阶段');
+  assert.equal(loaded.settings.voice, false, '语音默认关,升级不该突然开始外放');
+  // 原有设置一个都不能被覆盖
+  assert.equal(loaded.settings.presetKey, 'advanced');
+  assert.equal(loaded.settings.sound, false);
+  assert.deepEqual(loaded.settings.reminder, { enabled: true, time: '07:30' });
+  assert.equal(loaded.records.length, 1);
 });
 
 test('空存储 → 默认值', () => {
@@ -96,7 +119,9 @@ test('save/load 往返', () => {
     settings: {
       presetKey: 'advanced',
       custom: { contractSec: 7, relaxSec: 7, repsPerSet: 8, sets: 2, restSec: 15, prepareSec: 2 },
+      holdSec: 4,
       sound: false,
+      voice: false,
       vibration: false,
       reminder: { enabled: true, time: '07:30' },
     },
@@ -118,6 +143,8 @@ test('旧版本 settings 缺键 → 合并出新默认键(浅合并 + reminder/c
   assert.deepEqual(loaded.settings, {
     presetKey: 'beginner',
     sound: false,
+    voice: false,
+    holdSec: 0,
     vibration: true,
     custom: DEFAULT_SETTINGS.custom,
     reminder: DEFAULT_SETTINGS.reminder,

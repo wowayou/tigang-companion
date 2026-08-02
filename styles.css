@@ -11,6 +11,10 @@
   --muted: #6d8280;
   --line: #e3ebe9;
   --danger: #c2544d;
+  /* 暖色只服务于两件事:连续天数(火苗)与「维持」阶段 —— 全局唯一的暖调,用来标记「最需要使劲的地方」 */
+  --flame: #e0913a;
+  --flame-soft: #fbeedc;
+  --flame-ink: #9a5f16;
   --radius: 16px;
   --radius-sm: 10px;
   --shadow: 0 1px 2px rgba(16, 50, 47, .05), 0 8px 22px rgba(16, 50, 47, .06);
@@ -41,10 +45,24 @@ body {
   overscroll-behavior-y: none;
 }
 
+/*
+ * 撑满一屏并让引导圆吃掉剩余空间:高屏上圆居中而不是内容堆在顶部、底下一大块空;
+ * 矮屏上 .coach 的 min-height 兜底,圆不会被压扁。
+ */
 .app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: calc(100dvh - var(--tabbar-h) - env(safe-area-inset-bottom, 0px));
   max-width: 480px;
   margin: 0 auto;
   padding: 0 16px;
+}
+
+.app-main {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---------------- 顶栏 ---------------- */
@@ -55,19 +73,54 @@ body {
   z-index: 5;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 0 10px;
-  background: linear-gradient(var(--bg) 70%, rgba(246, 248, 247, 0));
+  gap: 10px;
+  padding: 12px 0 8px;
+  /* 必须不透明:v1 用半透明渐变,滚动时卡片文字会从标题后面透出来 */
+  background: var(--bg);
+}
+
+/* 顶栏下缘的一小段淡出,让滚动内容不是硬切进标题栏 */
+.app-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 10px;
+  background: linear-gradient(var(--bg), rgba(246, 248, 247, 0));
+  pointer-events: none;
 }
 
 .app-title {
+  flex: 1;
   margin: 0;
   font-size: 19px;
   font-weight: 700;
   letter-spacing: .04em;
   color: var(--text);
 }
+
+/* 连续天数常驻顶栏:每次打开应用第一眼就看到自己的连续记录 */
+.streak-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  padding: 5px 11px 5px 9px;
+  border-radius: 999px;
+  background: var(--flame-soft);
+  color: var(--flame-ink);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.streak-chip b {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.streak-chip-unit { font-size: 11.5px; opacity: .75; }
 
 .icon-btn {
   display: inline-flex;
@@ -90,9 +143,15 @@ body {
 
 /* ---------------- 通用块 ---------------- */
 
-.app-main { padding-bottom: 6px; }
+.panel {
+  flex: 1 1 auto;
+  padding-bottom: 4px;
+}
 
-.panel { padding-bottom: 4px; }
+#panel-train {
+  display: flex;
+  flex-direction: column;
+}
 
 .card {
   margin: 0 0 14px;
@@ -118,6 +177,58 @@ body {
 }
 
 /* ---------------- 方案选择 ---------------- */
+
+/*
+ * 方案卡默认折叠成一行:v1 展开的 5 个胶囊 + 摘要把引导圆挤出了首屏,
+ * 手机上要滚动才能看到最重要的东西。方案是「设一次就不动」的,收起来才对。
+ */
+.plan-card { padding: 0; overflow: hidden; }
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.plan-head-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.plan-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.plan-chevron {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  transition: transform .22s ease;
+}
+
+.plan-head[aria-expanded="true"] .plan-chevron { transform: rotate(180deg); }
+
+.plan-head:disabled { cursor: not-allowed; }
+.plan-head:disabled .plan-chevron { opacity: .35; }
+
+.plan-body {
+  padding: 2px 14px 14px;
+  border-top: 1px solid var(--line);
+}
 
 .pills {
   display: flex;
@@ -200,20 +311,104 @@ body {
 
 .field input:disabled { opacity: .5; }
 
+/* 开了维持之后摘要会变长,允许折到第二行 —— 截断成「约 9 分 4…」等于没说 */
 .plan-summary {
-  margin: 12px 0 0;
   font-size: 12.5px;
+  line-height: 1.45;
   color: var(--muted);
 }
+
+/* 「维持」开关:放在方案卡里而不是设置里,因为它直接改变训练时长与摘要 */
+.hold-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--line);
+}
+
+.hold-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.hold-sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.hold-sec label { font-size: 13px; color: var(--muted); }
+
+.hold-sec-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.hold-sec-input input {
+  width: 72px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: #fbfdfc;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  text-align: center;
+}
+
+.hold-sec-input input:focus {
+  outline: none;
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(15, 155, 142, .14);
+}
+
+.hold-block .hint { margin-top: 10px; }
 
 /* ---------------- 引导圆 ---------------- */
 
 .coach {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 262px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 1 1 auto;
+  min-height: 244px;
   margin: 2px 0 4px;
+}
+
+/*
+ * 相位环 = 当前阶段的剩余时间,顺时针从 12 点开始消耗。
+ * 它和圆是兄弟节点(不是父子):圆要跟着呼吸缩放,环必须保持固定尺寸才读得出时间。
+ */
+.coach-ring {
+  --ring: 100;
+  --ring-color: rgba(15, 155, 142, .5);
+  --ring-track: rgba(15, 155, 142, .1);
+  position: absolute;
+  width: 236px;
+  height: 236px;
+  border-radius: 50%;
+  background: conic-gradient(var(--ring-color) calc(var(--ring) * 1%), var(--ring-track) 0);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+  mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
+  opacity: 1;
+  transition: opacity .35s ease;
+  pointer-events: none;
+}
+
+/* 未开始/已结束没有「剩余时间」可言,环收起来 */
+.coach-ring[data-phase="idle"],
+.coach-ring[data-phase="done"] { opacity: 0; }
+
+.coach-ring[data-phase="hold"] {
+  --ring-color: var(--flame);
+  --ring-track: rgba(224, 145, 58, .16);
 }
 
 .coach-circle {
@@ -223,8 +418,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  width: 220px;
-  height: 220px;
+  width: 200px;
+  height: 200px;
   border-radius: 50%;
   background: linear-gradient(160deg, #7fc9c0, #4bb3a7);
   color: #fff;
@@ -236,45 +431,55 @@ body {
   will-change: transform;
 }
 
+/* 圆内侧一圈高光,只在「维持」时脉动 —— 提示「别松,稳住」 */
 .coach-circle::after {
   content: "";
   position: absolute;
-  inset: -16px;
-  border: 2px solid rgba(15, 155, 142, .3);
+  inset: 10px;
+  border: 2px solid rgba(255, 255, 255, .45);
   border-radius: 50%;
   opacity: 0;
   pointer-events: none;
 }
 
-.coach-circle.is-pulsing::after { animation: halo 1.9s ease-in-out infinite; }
+.coach-circle.is-pulsing::after { animation: hold-pulse 1.5s ease-in-out infinite; }
 .coach-circle.is-paused::after { animation-play-state: paused; }
 
-@keyframes halo {
-  0%   { transform: scale(.92); opacity: 0; }
-  45%  { opacity: .7; }
-  100% { transform: scale(1.1); opacity: 0; }
+@keyframes hold-pulse {
+  0%, 100% { opacity: .15; transform: scale(1); }
+  50%      { opacity: .7;  transform: scale(.965); }
 }
 
+/*
+ * 相位配色按「用力程度」由浅到深排列,余光扫一眼就能分辨:
+ * 放松/休息浅、收紧深、维持最深(唯一带暖色环的阶段)。
+ */
+/* 空闲态底色浅,白字几乎看不清 —— 这里换成深色文字 */
 .coach-circle[data-phase="idle"] {
-  background: linear-gradient(160deg, #cfe3e0, #aecfc9);
+  background: linear-gradient(160deg, #d5e7e4, #b3d2cc);
   box-shadow: 0 8px 24px rgba(28, 43, 42, .1);
+  color: #486a66;
 }
 .coach-circle[data-phase="prepare"] { background: linear-gradient(160deg, #86cfc5, #43ab9f); }
 .coach-circle[data-phase="contract"] { background: linear-gradient(160deg, #14a294, #0a736a); }
+.coach-circle[data-phase="hold"] {
+  background: linear-gradient(160deg, #0b6b62, #053b36);
+  box-shadow: 0 10px 30px rgba(11, 107, 98, .32);
+}
 .coach-circle[data-phase="relax"] { background: linear-gradient(160deg, #6fc9bd, #35a99c); }
 .coach-circle[data-phase="rest"] { background: linear-gradient(160deg, #9ecfbf, #63b09f); }
 .coach-circle[data-phase="done"] { background: linear-gradient(160deg, #12a89a, #0b7d73); }
 
 .phase-label {
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 600;
-  letter-spacing: .22em;
-  text-indent: .22em;
-  opacity: .92;
+  letter-spacing: .26em;
+  text-indent: .26em;
+  opacity: .95;
 }
 
 .countdown {
-  font-size: 62px;
+  font-size: 58px;
   font-weight: 300;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
@@ -284,7 +489,7 @@ body {
 /* ---------------- 进度 ---------------- */
 
 .set-progress {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
   text-align: center;
   font-size: 13.5px;
   color: var(--muted);
@@ -293,7 +498,7 @@ body {
 
 .progress-track {
   height: 6px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
   border-radius: 999px;
   background: #e4ecea;
   overflow: hidden;
@@ -313,7 +518,7 @@ body {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
   gap: 10px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .btn {
@@ -373,25 +578,81 @@ body {
 }
 
 .done-title {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 16px;
   font-weight: 700;
   color: var(--teal-dark);
 }
 
-.done-list {
+.done-line {
   margin: 0;
-  padding: 0;
-  list-style: none;
   font-size: 14px;
   color: var(--text);
 }
 
-.done-list li + li { margin-top: 4px; }
-.done-list strong {
+.done-line strong,
+.done-streak strong {
   font-weight: 700;
   color: var(--teal-dark);
   font-variant-numeric: tabular-nums;
+}
+
+/* 连续天数 + 距下一枚徽章还差多少 —— 完成的那一刻正是最想再来一次的时候 */
+.done-streak {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.done-streak-head { font-size: 14px; }
+.done-streak-head strong { color: var(--flame-ink); }
+
+.mini-track {
+  height: 5px;
+  border-radius: 999px;
+  background: #d7e8e4;
+  overflow: hidden;
+}
+
+.mini-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--flame), #d97b2b);
+  transition: width .6s cubic-bezier(.2, .8, .3, 1);
+}
+
+.done-next {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.done-unlocked {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--teal-line);
+}
+
+.done-unlocked-title {
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  letter-spacing: .1em;
+  color: var(--flame-ink);
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge-row .badge {
+  animation: badge-pop .5s cubic-bezier(.2, 1.5, .4, 1) both;
+}
+
+@keyframes badge-pop {
+  from { opacity: 0; transform: scale(.5) rotate(-8deg); }
+  to   { opacity: 1; transform: none; }
 }
 
 /* ---------------- 统计 ---------------- */
@@ -411,6 +672,90 @@ body {
   letter-spacing: .18em;
   text-indent: .18em;
   color: var(--muted);
+}
+
+.today-goal {
+  margin: 12px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.today-goal[data-met="true"] { color: var(--teal-dark); font-weight: 600; }
+
+/* ---------------- 徽章墙 ---------------- */
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.card-head .card-title { margin-bottom: 12px; }
+
+.badge-count {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.badge-wall {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fbfdfc;
+  text-align: center;
+}
+
+.badge-icon {
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.badge-name {
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: var(--muted);
+}
+
+.badge[data-unlocked="true"] {
+  border-color: var(--teal-line);
+  background: var(--teal-soft);
+}
+
+.badge[data-unlocked="true"] .badge-name {
+  color: var(--teal-dark);
+  font-weight: 600;
+}
+
+/* 未解锁只留轮廓,不剧透难度也不喧宾夺主 */
+.badge[data-unlocked="false"] .badge-icon {
+  filter: grayscale(1);
+  opacity: .35;
+}
+
+.next-badge {
+  margin: 12px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+.next-badge strong {
+  color: var(--flame-ink);
+  font-weight: 600;
 }
 
 .stat-grid {
@@ -505,7 +850,7 @@ body {
 /* ---------------- 页脚 & tab 栏 ---------------- */
 
 .app-footer {
-  padding: 6px 0 16px;
+  padding: 4px 0 12px;
   text-align: center;
   font-size: 12px;
   color: #93a5a3;
@@ -579,13 +924,48 @@ body {
 
 .opt-text { font-size: 15px; }
 
+/*
+ * 自绘开关:原生 checkbox 在 iOS 上是带蓝色聚焦框的方块勾,和整个应用格格不入。
+ * 用 appearance:none 接管,不需要额外 DOM 节点。
+ */
 .switch {
-  width: 44px;
-  height: 26px;
+  position: relative;
+  flex: none;
+  width: 46px;
+  height: 28px;
   margin: 0;
-  accent-color: var(--teal);
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #d3dedb;
+  -webkit-appearance: none;
+  appearance: none;
   cursor: pointer;
+  transition: background .2s ease;
 }
+
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 50, 47, .3);
+  transition: transform .2s cubic-bezier(.3, 1.4, .6, 1);
+}
+
+.switch:checked { background: var(--teal); }
+.switch:checked::after { transform: translateX(18px); }
+
+.switch:focus-visible {
+  outline: 2px solid var(--teal-dark);
+  outline-offset: 2px;
+}
+
+.switch:disabled { opacity: .45; cursor: not-allowed; }
 
 .time-input {
   padding: 6px 10px;
@@ -611,10 +991,21 @@ body {
     transition-duration: .01ms !important;
     transform: scale(1) !important;
   }
-  .coach-circle.is-pulsing::after { animation: none; }
-  .progress-bar { transition: none; }
+  /* 相位环是逐帧写入的数值,不是动画,减弱动效时保留 —— 它是唯一还能表达「还剩多久」的视觉线索 */
+  .coach-circle.is-pulsing::after { animation: none; opacity: .35; }
+  .badge-row .badge { animation: none; }
+  .progress-bar,
+  .mini-bar { transition: none; }
 }
 
 @media (min-width: 420px) {
-  .countdown { font-size: 66px; }
+  .countdown { font-size: 62px; }
+}
+
+/* 极矮屏(如 iPhone SE 横向浏览器栏占位后)优先保住引导圆完整可见 */
+@media (max-height: 700px) {
+  .coach { height: 214px; }
+  .coach-circle { width: 176px; height: 176px; }
+  .coach-ring { width: 208px; height: 208px; }
+  .countdown { font-size: 50px; }
 }

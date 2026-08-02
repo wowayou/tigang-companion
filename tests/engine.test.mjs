@@ -47,18 +47,18 @@ test('§6.1 四个 PRESETS 均通过 validateConfig 且值不变', () => {
 
 test('§6.2 validateConfig:超范围夹取', () => {
   assert.deepEqual(
-    validateConfig({ contractSec: 999, relaxSec: 999, repsPerSet: 999, sets: 999, restSec: 999, prepareSec: 999 }),
-    { contractSec: 30, relaxSec: 30, repsPerSet: 50, sets: 10, restSec: 180, prepareSec: 10 },
+    validateConfig({ contractSec: 999, holdSec: 999, relaxSec: 999, repsPerSet: 999, sets: 999, restSec: 999, prepareSec: 999 }),
+    { contractSec: 30, holdSec: 60, relaxSec: 30, repsPerSet: 50, sets: 10, restSec: 180, prepareSec: 10 },
   );
   assert.deepEqual(
-    validateConfig({ contractSec: -5, relaxSec: 0, repsPerSet: 0, sets: -1, restSec: -10, prepareSec: -3 }),
-    { contractSec: 1, relaxSec: 1, repsPerSet: 1, sets: 1, restSec: 0, prepareSec: 0 },
+    validateConfig({ contractSec: -5, holdSec: -1, relaxSec: 0, repsPerSet: 0, sets: -1, restSec: -10, prepareSec: -3 }),
+    { contractSec: 1, holdSec: 0, relaxSec: 1, repsPerSet: 1, sets: 1, restSec: 0, prepareSec: 0 },
   );
 });
 
 test('§6.2 validateConfig:小数取整', () => {
-  const out = validateConfig({ contractSec: 3.4, relaxSec: 3.6, repsPerSet: 10.5, sets: 2.2, restSec: 20.7, prepareSec: 3.5 });
-  assert.deepEqual(out, { contractSec: 3, relaxSec: 4, repsPerSet: 11, sets: 2, restSec: 21, prepareSec: 4 });
+  const out = validateConfig({ contractSec: 3.4, holdSec: 6.5, relaxSec: 3.6, repsPerSet: 10.5, sets: 2.2, restSec: 20.7, prepareSec: 3.5 });
+  assert.deepEqual(out, { contractSec: 3, holdSec: 7, relaxSec: 4, repsPerSet: 11, sets: 2, restSec: 21, prepareSec: 4 });
   for (const v of Object.values(out)) assert.ok(Number.isInteger(v));
 });
 
@@ -352,4 +352,124 @@ test('§6.9 不可变性:所有转移都不修改入参', () => {
   // 状态可 JSON 序列化
   const roundTrip = JSON.parse(JSON.stringify(resumed));
   assert.deepEqual(roundTrip, resumed);
+});
+
+/* ================================================================== *
+ * §6.10 维持(hold)阶段 —— holdSec>0 时每次循环变成 收紧→维持→放松
+ * ================================================================== */
+
+// 1s 收紧 / 2s 维持 / 1s 放松 / 每组 2 次 / 2 组 / 1s 组间休息 / 1s 准备
+const CFG_HOLD = { contractSec: 1, holdSec: 2, relaxSec: 1, repsPerSet: 2, sets: 2, restSec: 1, prepareSec: 1 };
+
+test('§6.10 三段式完整流程:阶段序列 / 总时长 / 结束态', () => {
+  // 1 + 2组*2次*(1收紧+2维持) + 2组*1次*1放松 + 1组间休息 = 1+12+2+1 = 16
+  assert.equal(totalDurationSec(CFG_HOLD), 16);
+
+  const { state, transitions } = runStepwise(CFG_HOLD, 16000, 500);
+  assert.deepEqual(transitions, [
+    ['prepare', 0],
+    ['contract', 1000],
+    ['hold', 2000],
+    ['relax', 4000],
+    ['contract', 5000],
+    ['hold', 6000],
+    ['rest', 8000],
+    ['contract', 9000],
+    ['hold', 10000],
+    ['relax', 12000],
+    ['contract', 13000],
+    ['hold', 14000],
+    ['done', 16000],
+  ]);
+
+  assert.equal(state.phase, 'done');
+  assert.equal(state.completedReps, 4);
+  assert.equal(state.finishedAt, 16000);
+  assert.equal(state.phaseEndsAt, null);
+});
+
+test('§6.10 收缩计数在维持结束才 +1(收紧段不算完成)', () => {
+  let s = start(createSession(CFG_HOLD), 0);
+  s = tick(s, 1500);                       // contract 中
+  assert.equal(s.phase, 'contract');
+  assert.equal(s.completedReps, 0);
+  s = tick(s, 2500);                       // hold 中,本次仍未完成
+  assert.equal(s.phase, 'hold');
+  assert.equal(s.completedReps, 0);
+  assert.equal(s.repIndex, 0, 'hold 期间索引仍指向当前这次');
+  s = tick(s, 4500);                       // hold 结束 → relax,第 1 次完成
+  assert.equal(s.phase, 'relax');
+  assert.equal(s.completedReps, 1);
+  assert.equal(s.repIndex, 1, 'relax 期间索引指向下一次');
+});
+
+test('§6.10 holdSec=0 / 缺失 holdSec 键都退化成 v1 两段式', () => {
+  const legacy = { contractSec: 1, relaxSec: 1, repsPerSet: 2, sets: 2, restSec: 1, prepareSec: 1 }; // 无 holdSec
+  const explicitZero = { ...legacy, holdSec: 0 };
+
+  // 与 §6.3 的 CFG 完全一致的阶段序列
+  const expected = runStepwise(CFG, 8000, 500).transitions;
+  assert.deepEqual(runStepwise(legacy, 8000, 500).transitions, expected);
+  assert.deepEqual(runStepwise(explicitZero, 8000, 500).transitions, expected);
+
+  // 纯函数在裸 config(无 holdSec 键)上也不能算出 NaN
+  assert.equal(totalDurationSec(legacy), 8);
+  assert.equal(phaseDurationSec(legacy, 'hold'), 0);
+  assert.equal(validateConfig(legacy).holdSec, 0, '缺失 holdSec 回落为 0 而非 standard 值');
+});
+
+test('§6.10 大步长 tick 跨多个阶段与逐步 tick 一致', () => {
+  const stepwise = runStepwise(CFG_HOLD, 16000, 250).state;
+  const oneShot = tick(start(createSession(CFG_HOLD), 0), 16000);
+  assert.deepEqual(oneShot, stepwise);
+
+  // 一次 tick 直接从 prepare 跨到第二组的 hold
+  const jump = tick(start(createSession(CFG_HOLD), 0), 10500);
+  assert.equal(jump.phase, 'hold');
+  assert.equal(jump.setIndex, 1);
+  assert.equal(jump.repIndex, 0);
+  assert.equal(jump.completedReps, 2);
+});
+
+test('§6.10 三段式下 remainingTotalSec 单调不增、边界不跳变', () => {
+  const total = totalDurationSec(CFG_HOLD);
+  let state = start(createSession(CFG_HOLD), 0);
+  assert.equal(remainingTotalSec(state, 0), total);
+
+  let prevRemaining = Infinity;
+  let prevProgress = -Infinity;
+  for (let t = 0; t <= 17000; t += 250) {
+    state = tick(state, t);
+    const remaining = remainingTotalSec(state, t);
+    const progress = overallProgress(state, t);
+    assert.ok(remaining <= prevRemaining + 1e-9, `t=${t} 剩余时长增加了:${prevRemaining} → ${remaining}`);
+    assert.ok(progress >= prevProgress - 1e-9, `t=${t} 进度回退了:${prevProgress} → ${progress}`);
+    prevRemaining = remaining;
+    prevProgress = progress;
+  }
+  assert.equal(state.phase, 'done');
+  assert.equal(overallProgress(state, 17000), 1);
+
+  for (const t of [1000, 2000, 4000, 5000, 6000, 8000, 9000, 10000, 12000, 13000, 14000]) {
+    const before = tick(start(createSession(CFG_HOLD), 0), t - 1);
+    const after = tick(start(createSession(CFG_HOLD), 0), t);
+    assert.ok(
+      Math.abs(remainingTotalSec(before, t) - remainingTotalSec(after, t)) < 1e-9,
+      `边界 ${t} 剩余时长跳变`,
+    );
+  }
+});
+
+test('§6.10 维持段可暂停/恢复', () => {
+  let s = start(createSession(CFG_HOLD), 0);
+  s = tick(s, 2500);
+  assert.equal(s.phase, 'hold');
+  s = pause(s, 2500);
+  assert.equal(s.pausedRemainingMs, 1500);
+  assert.equal(tick(s, 9999), s, '暂停期间 tick 不推进');
+  s = resume(s, 100000);
+  assert.equal(remainingInPhaseMs(s, 100000), 1500);
+  s = tick(s, 101500);
+  assert.equal(s.phase, 'relax');
+  assert.equal(s.completedReps, 1);
 });

@@ -349,11 +349,14 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 
 **呼吸节拍 `#breath`**(`settings.breath`,默认开):`BREATH_CYCLE_MS = 8000`(4s 吸 / 4s 呼),从 `breathAnchorMs` 算相位,开始与恢复时重置锚点(暂停期间不该「凭空呼吸了几轮」)。视觉上刻意比总进度条更细、无渐变、低饱和——它表达节奏而非进度,撞脸会被误读。
 
+**呼吸与训练阶段必须解耦(硬约束)**:`COACH_CUES` 里**不得出现「吸气」「呼气」等指定呼吸相位的文案**。理由是原理性的——维持段可能长达数十秒,期间必须正常呼吸好几轮,所以呼吸相位**无法**与训练阶段同步;任何「呼气时收紧」式的提示一遇到维持段就自相矛盾,还会和独立运行的呼吸节拍条直接打架(v3 曾出现 contract 提示「呼气,慢慢向上提起」而节拍条同时显示「吸气」)。这也与知识页的「收紧时正常呼吸、不要憋气」一致。要领里关于呼吸只说一句「别憋气 / 保持呼吸」,节奏交给节拍条。
+
 **键盘**:空格 = 开始 / 暂停 / 继续。设置弹窗打开时、或焦点在 `input/textarea/select/button/a`、可编辑元素上时不拦截(按钮上的空格是浏览器原生的「激活」,拦了会触发两次);其余情况 `preventDefault` 掉默认的翻页。
 
 **阶段过渡**:原则是**边界上只让一样东西在动**。
 
-- 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.5s`。各阶段同属青色系,插值干净。
+- 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
+- 相位环的**轨道色跨阶段保持不变**(只换弧的颜色):轨道是整场训练里唯一穿越所有边界都不变的元素,留作视觉锚点。
 - 相位环的 `--ring` 与配色**一律瞬时**,不要过渡。曾用 `@property` 注册后给它们补间,结果更差:环从空「扫」回满是一段抢眼的运动,青→琥珀的插值还会经过浑浊的橄榄色,再叠上圆变色与阶段名淡入 —— 边界上同时四样东西在动,比硬切更扎眼。阶段切换本就有提示音与文字同时到达,此刻的瞬时变化是被预期的。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。要领 `#coach-cue` 同理(`.22s`,从 `.3` 起)。两者都靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
@@ -380,7 +383,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v4'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+- sw.js:`CACHE_NAME='tigang-v5'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)

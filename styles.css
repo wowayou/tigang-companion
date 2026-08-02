@@ -412,10 +412,11 @@ body {
 .coach-ring[data-phase="idle"],
 .coach-ring[data-phase="done"] { opacity: 0; }
 
-.coach-ring[data-phase="hold"] {
-  --ring-color: var(--flame);
-  --ring-track: rgba(224, 145, 58, .16);
-}
+/*
+ * 只换弧的颜色,轨道保持不变 —— 轨道是整场训练里唯一跨越所有边界都不变的元素,
+ * 留着它当视觉锚点,阶段之间才不像是各自独立的画面。
+ */
+.coach-ring[data-phase="hold"] { --ring-color: var(--flame); }
 
 .coach-circle {
   position: relative;
@@ -438,10 +439,12 @@ body {
   transform: scale(1);
   transition-property: transform, background-color, color, box-shadow;
   /*
-   * transform 的时长由 JS 按阶段秒数改写;配色固定 .5s。
-   * 这是边界上唯一还在动的东西 —— 各阶段同属青色系,插值干净,不会像青→琥珀那样发浑。
+   * transform 的时长由 JS 按阶段秒数改写;配色固定 .9s。
+   * 这是边界上唯一还在动的东西,也正因为唯一,它得慢一点才能把前后两个阶段「连起来」——
+   * 太短(试过 .5s)会让阶段之间显得各自独立、缺少连贯感。
+   * 各阶段同属青色系,插值干净,不会像青→琥珀那样发浑。
    */
-  transition-duration: .4s, .5s, .5s, .5s;
+  transition-duration: .4s, .9s, .9s, .9s;
   transition-timing-function: cubic-bezier(.37, 0, .63, 1), ease, ease, ease;
   will-change: transform;
 }

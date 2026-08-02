@@ -127,13 +127,18 @@ const PHASE_SPEECH = {
  * 而这些要领只写在知识页没用 —— 没人会在维持到第 6 秒时切过去看。
  * 维持段有多条,按 CUE_ROTATE_MS 轮播;其余阶段各一条。
  * 内容与知识页同源(Mayo Clinic / NHS 盆底肌训练公开建议)。
+ *
+ * 【不要在这里写「吸气」「呼气」这类指定呼吸相位的话】
+ * 呼吸与训练阶段在原理上无法同步:维持段可能长达数十秒,期间必须正常呼吸好几轮,
+ * 任何「呼气时收紧」的提示一遇到维持段就自相矛盾,还会和下方独立运行的呼吸节拍打架。
+ * 呼吸这件事只说一句「别憋气、保持呼吸」,节奏交给呼吸节拍条。
  */
 const COACH_CUES = {
   prepare: ['像忍住排便那样,准备向上提'],
-  contract: ['呼气,慢慢向上提起'],
-  hold: ['正常呼吸,别憋气', '腹部、大腿、臀部放松', '只用盆底发力'],
+  contract: ['慢慢向上提起,别屏气'],
+  hold: ['别憋气,保持呼吸', '腹部、大腿、臀部放松', '只用盆底发力'],
   relax: ['完全松开,别提前收紧'],
-  rest: ['歇一会儿,正常呼吸'],
+  rest: ['歇一会儿,保持呼吸'],
 };
 
 const CUE_ROTATE_MS = 2600;
@@ -376,7 +381,7 @@ function animateCircle(phase, durationSec) {
   circle.classList.remove('is-paused');
   // 四个值依次对应 transform / background-color / color / box-shadow:
   // 只有缩放跟着阶段秒数走,配色一律用固定的 .55s 平滑跨过边界
-  circle.style.transitionDuration = `${Math.max(0, durationSec)}s, .5s, .5s, .5s`;
+  circle.style.transitionDuration = `${Math.max(0, durationSec)}s, .9s, .9s, .9s`;
   circle.style.transform = `scale(${targetScale(phase)})`;
   restartAnimation(el.phaseLabel);
 }
@@ -401,7 +406,7 @@ function enterPhaseVisual(state) {
 function freezeCircle() {
   const circle = el.coachCircle;
   const current = window.getComputedStyle(circle).transform;
-  circle.style.transitionDuration = '0s, .5s, .5s, .5s';
+  circle.style.transitionDuration = '0s, .9s, .9s, .9s';
   circle.style.transform = current && current !== 'none' ? current : 'scale(1)';
   circle.classList.add('is-paused');
 }

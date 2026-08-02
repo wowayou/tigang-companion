@@ -449,9 +449,8 @@ function renderTrain() {
 
   const running = isRunning(s);
 
-  // 计数口径:一次收缩在「收紧(+维持)结束」的那一刻记完成,同时 repIndex 跳到下一次。
-  // 所以放松期间 repIndex 已经指向下一次了 —— 这时报「第 N 次」会让人以为下一次已经开始,
-  // 改成报已完成数(此时 repIndex 恰好等于刚做完那次的 1 基序号)。
+  // 计数口径:收紧(+维持)结束即记完成,但索引要到放松结束才推进 ——
+  // 所以放松期间 repIndex 指向的正是刚做完的那一次,报已完成数就用 repIndex+1。
   if (!running) {
     el.setProgress.textContent = idleHintText;
   } else if (s.phase === 'rest') {
@@ -459,7 +458,7 @@ function renderTrain() {
   } else if (s.phase === 'prepare') {
     el.setProgress.textContent = `准备开始 · 共 ${c.sets} 组 × ${c.repsPerSet} 次`;
   } else if (s.phase === 'relax') {
-    el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 已完成 ${s.repIndex}/${c.repsPerSet} 次`;
+    el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 已完成 ${s.repIndex + 1}/${c.repsPerSet} 次`;
   } else {
     el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 第 ${s.repIndex + 1}/${c.repsPerSet} 次`;
   }

@@ -98,10 +98,10 @@ export function phaseDurationSec(config, phase) {
 export function totalDurationSec(config) {
   const { prepareSec, contractSec, relaxSec, repsPerSet, sets, restSec } = config;
   const holdSec = holdOf(config);
+  // 每次收缩都自带一次放松(含每组最后一次),所以放松是 sets*reps 而不是 sets*(reps-1)
   return (
     prepareSec +
-    sets * repsPerSet * (contractSec + holdSec) +
-    sets * (repsPerSet - 1) * relaxSec +
+    sets * repsPerSet * (contractSec + holdSec + relaxSec) +
     (sets - 1) * restSec
   );
 }
@@ -154,26 +154,28 @@ export function tick(state, nowMs) {
       // 收紧到位 → 维持;本次收缩要到维持结束才算完成
       phase = 'hold';
     } else if (phase === 'contract' || phase === 'hold') {
-      // 两段式的 contract 末尾、或三段式的 hold 末尾:一次收缩完成
+      // 两段式的 contract 末尾、或三段式的 hold 末尾:一次收缩完成,随即放松。
+      // 放松是「一次」的组成部分而非两次之间的间隔,所以每组最后一次之后同样要放松
+      // (Cleveland Clinic:「收紧 N 秒,然后放松 N 秒,这就是一次凯格尔」)。
       completedReps += 1;
+      phase = 'relax';
+    } else if (phase === 'relax') {
+      // 一次收缩到此才算真正走完,索引在这里推进
       if (repIndex < config.repsPerSet - 1) {
-        // 本组还有下一次收缩:进入 relax,索引指向下一次收缩
         repIndex += 1;
-        phase = 'relax';
+        phase = 'contract';
       } else if (setIndex < config.sets - 1) {
-        // 本组结束,进入下一组
         setIndex += 1;
         repIndex = 0;
         phase = config.restSec > 0 ? 'rest' : 'contract';
       } else {
-        // 全部完成
         phase = 'done';
         finishedAt = boundary;
         phaseEndsAt = null;
         break;
       }
     } else {
-      // prepare / relax / rest → contract(索引不变)
+      // prepare / rest → contract(索引不变)
       phase = 'contract';
     }
 
@@ -228,22 +230,26 @@ export function remainingInPhaseMs(state, nowMs) {
 function remainingAfterPhaseSec(config, phase, setIndex, repIndex) {
   const { contractSec, relaxSec, repsPerSet, sets, restSec } = config;
   const holdSec = holdOf(config);
-  const repCost = contractSec + holdSec;               // 一次收缩(收紧+维持)的成本
-  const setCost = repsPerSet * repCost + (repsPerSet - 1) * relaxSec;
+  const repCost = contractSec + holdSec + relaxSec;    // 完整一次:收紧 + 维持 + 放松
+  const setCost = repsPerSet * repCost;
   const laterSets = (sets - 1 - setIndex) * (restSec + setCost);
-  // 本组当前这次之后还剩几次完整的「放松+收紧+维持」
-  const laterRepsInSet = (repsPerSet - 1 - repIndex) * (relaxSec + repCost);
+  // 本组里当前这次「之后」还剩几次完整的收缩
+  const laterRepsInSet = (repsPerSet - 1 - repIndex) * repCost;
 
   if (phase === 'contract') {
-    // 后面还有本次的维持段(两段式时 holdSec=0,自然退化)
-    return holdSec + laterRepsInSet + laterSets;
+    // 本次还剩维持段(两段式 holdSec=0 自然退化)与放松段
+    return holdSec + relaxSec + laterRepsInSet + laterSets;
   }
   if (phase === 'hold') {
+    return relaxSec + laterRepsInSet + laterSets;
+  }
+  if (phase === 'relax') {
+    // 放松是本次的收尾,放完就轮到下一次
     return laterRepsInSet + laterSets;
   }
-  if (phase === 'prepare' || phase === 'relax' || phase === 'rest') {
-    // 下一个阶段是第 (setIndex, repIndex) 次收缩的收紧段
-    return (repsPerSet - repIndex) * repCost + (repsPerSet - 1 - repIndex) * relaxSec + laterSets;
+  if (phase === 'prepare' || phase === 'rest') {
+    // 下一个阶段是第 (setIndex, repIndex) 次收缩的收紧段,本组含这次还剩若干次
+    return (repsPerSet - repIndex) * repCost + laterSets;
   }
   return 0;
 }

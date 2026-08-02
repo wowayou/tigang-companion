@@ -54,6 +54,8 @@ tigang-companion/
 | advanced | 进阶耐力 | 10 | 0 | 10 | 10 | 3 | 30 |
 | quick | 快速爆发 | 1 | 0 | 1 | 20 | 2 | 20 |
 
+**一次 = 收紧(+维持)+ 放松**,放松时长与收缩相当,且每次收缩都配一次放松。依据:Cleveland Clinic「收紧 3 秒,然后放松 3 秒,**这就是一次凯格尔**」;Harvard Health「每次保持 3-5 秒,间隔相同秒数休息……每次重复之间要有意识地放松,放松时长与收缩相同」。组间休息是在此之上的额外恢复,不能替代放松。
+
 四个预设的 `holdSec` 都固化为 0(默认关闭「维持」阶段,老用户行为不变)。`holdSec` 是**全局设置**(见 §5),不是预设/custom 各自的字段——同一时刻只有一份「维持时长」,叠加在任意方案之上。准备时间 prepareSec 统一默认 3。另支持 custom 自定义。
 
 ## §3 core/engine.js 契约
@@ -79,7 +81,8 @@ export function validateConfig(raw) {}
 //   config,                 // validateConfig 后的配置
 //   phase: 'idle'|'prepare'|'contract'|'hold'|'relax'|'rest'|'done',
 //   setIndex: 0,            // 0 起,始终指向当前/即将进行的组
-//   repIndex: 0,            // 0 起,始终指向当前/即将进行的收缩
+//   repIndex: 0,            // 0 起;收紧/维持期间指向进行中的这次,放松期间指向刚做完的这次
+//                           // (索引推进发生在放松结束,见下方状态机)
 //   phaseEndsAt: null,      // 当前阶段结束的毫秒时间戳;idle/done/暂停时为 null
 //   paused: false,
 //   pausedRemainingMs: null,
@@ -97,7 +100,8 @@ export function reset(state) {}          // 返回 createSession(state.config)
 
 export function phaseDurationSec(config, phase) {}      // prepare/contract/hold/relax/rest 对应秒数
 export function totalDurationSec(config) {}
-// = prepare + sets*reps*(contract+hold) + sets*(reps-1)*relax + (sets-1)*rest
+// = prepare + sets*reps*(contract+hold+relax) + (sets-1)*rest
+// 注意放松是 sets*reps 而非 sets*(reps-1):每次收缩都自带放松,包括每组最后一次。
 export function remainingInPhaseMs(state, nowMs) {}     // idle/done→0;paused→pausedRemainingMs
 export function remainingTotalSec(state, nowMs) {}      // 当前阶段剩余 + 之后所有阶段时长
 export function overallProgress(state, nowMs) {}        // 0..1;= 1 - remainingTotal/total;done→1, idle→0
@@ -110,13 +114,15 @@ export function overallProgress(state, nowMs) {}        // 0..1;= 1 - remainingT
 - `prepare` → `contract`(索引不变)
 - `contract` 结束:
   - 若 `holdSec > 0` → 进入 `hold`(**本次收缩此时尚未计数**,`completedReps` 不变)
-  - 若 `holdSec === 0`(两段式)→ 视同下面「一次收缩完成」,直接走 `completedReps++` 分支(与 v1 完全一致)
-- `hold` 结束 → 一次收缩完成:`completedReps++`;然后:
-  - 若 `repIndex < repsPerSet-1` → `relax`,同时 `repIndex++`(relax 期间索引指向下一次收缩)
+  - 若 `holdSec === 0`(两段式)→ 视同下面「一次收缩完成」
+- `hold` 结束(或两段式的 `contract` 结束)→ 一次收缩完成:`completedReps++`,**一律进入 `relax`**,索引不动
+- `relax` 结束 → 一次收缩到此才算走完,索引在这里推进:
+  - 若 `repIndex < repsPerSet-1` → `repIndex++`,进 `contract`
   - 否则若 `setIndex < sets-1` → `setIndex++; repIndex=0`;`restSec>0` 进 `rest`,`restSec===0` 直接进下一组 `contract`
   - 否则 → `done`,`finishedAt` = 该边界时间戳,`phaseEndsAt=null`
-- `relax` → `contract`(索引不变)
 - `rest` → `contract`(索引不变)
+
+**放松属于「一次」而不是「两次之间的间隔」**(硬约束):每组最后一次、以及全程最后一次收缩之后同样要放松,不能被 `rest`/`done` 吞掉。依据见 §2;曾经的 `sets*(reps-1)*relax` 模型是错的(理由见 DEVELOPMENT.md D25)。这也意味着**不存在 phase 相同的相邻阶段**了(旧模型在 `restSec=0` 跨组时会出现 `contract→contract`)。
 
 所有函数**不可变更新**:返回新对象,绝不修改入参(tick 无变化时可返回原引用)。
 
@@ -328,17 +334,17 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 
 ### §8.y 训练中的教练层、计数口径、键盘与过渡
 
-**计数口径(`#set-progress` 的文案分支)**:一次收缩在「收紧(或维持)结束」的那一刻计入 `completedReps`,同时 `repIndex` 立刻指向下一次。所以放松期间 `repIndex` 已经是下一次的下标了 —— 此时若照报「第 N 次」会让人误以为下一次已经开始。文案按阶段分支:
+**计数口径(`#set-progress` 的文案分支)**:一次收缩在「收紧(或维持)结束」的那一刻计入 `completedReps`,但 `repIndex` 要到**放松结束**才推进。所以放松期间 `repIndex` 指向的正是刚做完的那一次。文案按阶段分支:
 
 | 阶段 | 文案 |
 |---|---|
 | idle / done | 今日状态(如 `连续 5 天 · 今天还没练`) |
 | prepare | `准备开始 · 共 {sets} 组 × {reps} 次` |
 | contract / hold | `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次` |
-| relax | `第 {setIndex+1}/{sets} 组 · 已完成 {repIndex}/{repsPerSet} 次` |
+| relax | `第 {setIndex+1}/{sets} 组 · 已完成 {repIndex+1}/{repsPerSet} 次` |
 | rest | `休息中 · 即将开始第 {setIndex+1} 组` |
 
-注意每组最后一次收缩之后**没有放松段**(直接进 rest/done),所以每组有 `repsPerSet-1` 次放松——这正是 `totalDurationSec` 里 `sets*(reps-1)*relax` 的由来。
+每组有 `repsPerSet` 次放松(每次收缩各配一次,含最后一次),对应 `totalDurationSec` 里的 `sets*reps*relax`。
 
 **键盘**:空格 = 开始 / 暂停 / 继续。设置弹窗打开时、或焦点在 `input/textarea/select/button/a`、可编辑元素上时不拦截(按钮上的空格是浏览器原生的「激活」,拦了会触发两次);其余情况 `preventDefault` 掉默认的翻页。
 
@@ -369,7 +375,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v6'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+- sw.js:`CACHE_NAME='tigang-v7'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)

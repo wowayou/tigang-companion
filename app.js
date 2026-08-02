@@ -376,7 +376,7 @@ function animateCircle(phase, durationSec) {
   circle.classList.remove('is-paused');
   // 四个值依次对应 transform / background-color / color / box-shadow:
   // 只有缩放跟着阶段秒数走,配色一律用固定的 .55s 平滑跨过边界
-  circle.style.transitionDuration = `${Math.max(0, durationSec)}s, .55s, .55s, .55s`;
+  circle.style.transitionDuration = `${Math.max(0, durationSec)}s, .5s, .5s, .5s`;
   circle.style.transform = `scale(${targetScale(phase)})`;
   restartAnimation(el.phaseLabel);
 }
@@ -401,7 +401,7 @@ function enterPhaseVisual(state) {
 function freezeCircle() {
   const circle = el.coachCircle;
   const current = window.getComputedStyle(circle).transform;
-  circle.style.transitionDuration = '0s, .55s, .55s, .55s';
+  circle.style.transitionDuration = '0s, .5s, .5s, .5s';
   circle.style.transform = current && current !== 'none' ? current : 'scale(1)';
   circle.classList.add('is-paused');
 }

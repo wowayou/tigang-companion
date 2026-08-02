@@ -383,34 +383,13 @@ body {
 }
 
 /*
- * 注册这三个自定义属性,浏览器才肯对它们做补间 —— 否则阶段切换时
- * 相位环会从 0% 硬跳回 100%、颜色硬切,正是「衔接生硬」的来源。
- * 不支持 @property 的老浏览器只是回到硬切,不影响功能。
- */
-@property --ring {
-  syntax: '<number>';
-  inherits: false;
-  initial-value: 100;
-}
-@property --ring-color {
-  syntax: '<color>';
-  inherits: false;
-  initial-value: rgba(15, 155, 142, .5);
-}
-@property --ring-track {
-  syntax: '<color>';
-  inherits: false;
-  initial-value: rgba(15, 155, 142, .1);
-}
-
-/*
  * 相位环 = 当前阶段的剩余时间,顺时针从 12 点开始消耗。
  * 它和圆是兄弟节点(不是父子):圆要跟着呼吸缩放,环必须保持固定尺寸才读得出时间。
  */
 .coach-ring {
   --ring: 100;
-  --ring-color: rgba(15, 155, 142, .5);
-  --ring-track: rgba(15, 155, 142, .1);
+  --ring-color: rgba(15, 155, 142, .72);
+  --ring-track: rgba(15, 155, 142, .12);
   position: absolute;
   width: 236px;
   height: 236px;
@@ -419,8 +398,13 @@ body {
   -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
   mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
   opacity: 1;
-  /* --ring 的补间要短:它同时也在平滑每 100ms 一次的倒计时写入,太长会明显滞后 */
-  transition: opacity .35s ease, --ring .15s linear, --ring-color .5s ease, --ring-track .5s ease;
+  /*
+   * 只过渡 opacity。环的重置与配色一律瞬时 —— 试过用 @property 给它们补间,反而更糟:
+   * 环从空「扫」回满是一段抢眼的运动,青→琥珀的插值还会经过浑浊的橄榄色,
+   * 再叠上圆变色和阶段名淡入,边界上同时四样东西在动。
+   * 阶段切换本来就有提示音和文字同时到达,此刻的瞬时变化是被预期的,不算突兀。
+   */
+  transition: opacity .35s ease;
   pointer-events: none;
 }
 
@@ -453,8 +437,11 @@ body {
   box-shadow: 0 10px 30px rgba(15, 155, 142, .25);
   transform: scale(1);
   transition-property: transform, background-color, color, box-shadow;
-  /* transform 的时长由 JS 按阶段秒数改写;颜色始终用固定的 .55s 跨过边界 */
-  transition-duration: .4s, .55s, .55s, .55s;
+  /*
+   * transform 的时长由 JS 按阶段秒数改写;配色固定 .5s。
+   * 这是边界上唯一还在动的东西 —— 各阶段同属青色系,插值干净,不会像青→琥珀那样发浑。
+   */
+  transition-duration: .4s, .5s, .5s, .5s;
   transition-timing-function: cubic-bezier(.37, 0, .63, 1), ease, ease, ease;
   will-change: transform;
 }
@@ -504,13 +491,16 @@ body {
   letter-spacing: .26em;
   text-indent: .26em;
   opacity: .95;
-  /* 阶段名换字时淡入,别硬闪 */
-  animation: phase-in .34s ease-out;
+  /*
+   * 换字时只做一次极短的提亮,不做位移、也不从 0 起。
+   * 阶段名是当前最要紧的指令,让它淡入 300ms 等于在最该看清的时刻看不清。
+   */
+  animation: phase-in .16s ease-out;
 }
 
 @keyframes phase-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to   { opacity: .95; transform: none; }
+  from { opacity: .4; }
+  to   { opacity: .95; }
 }
 
 .countdown {
@@ -535,12 +525,12 @@ body {
   text-align: center;
   font-size: 13.5px;
   color: var(--teal-dark);
-  animation: cue-in .32s ease-out;
+  animation: cue-in .22s ease-out;
 }
 
 @keyframes cue-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to   { opacity: 1; transform: none; }
+  from { opacity: .3; }
+  to   { opacity: 1; }
 }
 
 .breath {

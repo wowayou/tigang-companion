@@ -351,10 +351,11 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 
 **键盘**:空格 = 开始 / 暂停 / 继续。设置弹窗打开时、或焦点在 `input/textarea/select/button/a`、可编辑元素上时不拦截(按钮上的空格是浏览器原生的「激活」,拦了会触发两次);其余情况 `preventDefault` 掉默认的翻页。
 
-**阶段过渡**:阶段边界上「生硬」的来源是颜色与相位环的硬切,而非缩放。
-- 圆的底色改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.55s`。
-- `--ring` / `--ring-color` / `--ring-track` 用 `@property` 注册后才能补间,否则相位环每次换阶段都从 0% 硬跳回 100%。`--ring` 的过渡要短(.15s),它同时也在平滑每 100ms 一次的写入,太长会明显滞后。不支持 `@property` 的浏览器退回硬切,不影响功能。
-- 阶段名与要领换字时重放一次淡入动画(`restartAnimation()`:置 `animation:none` → 强制回流 → 复原)。
+**阶段过渡**:原则是**边界上只让一样东西在动**。
+
+- 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.5s`。各阶段同属青色系,插值干净。
+- 相位环的 `--ring` 与配色**一律瞬时**,不要过渡。曾用 `@property` 注册后给它们补间,结果更差:环从空「扫」回满是一段抢眼的运动,青→琥珀的插值还会经过浑浊的橄榄色,再叠上圆变色与阶段名淡入 —— 边界上同时四样东西在动,比硬切更扎眼。阶段切换本就有提示音与文字同时到达,此刻的瞬时变化是被预期的。
+- 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。要领 `#coach-cue` 同理(`.22s`,从 `.3` 起)。两者都靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
 ### §8.x DOM id 总表(app.js 实际引用的全部 63 个)
 
@@ -379,7 +380,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v3'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+- sw.js:`CACHE_NAME='tigang-v4'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)

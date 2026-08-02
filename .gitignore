@@ -1,3 +1,6 @@
 .DS_Store
 *.log
 node_modules/
+
+# 参考截图等本地素材,不进仓库
+外部/

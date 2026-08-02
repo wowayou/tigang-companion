@@ -157,6 +157,8 @@ export const DEFAULT_SETTINGS = {
   holdSec: 0,                       // 「维持」阶段秒数,0=关闭;全局值,叠加在任何方案(含 custom)之上
   sound: true,
   voice: false,                     // 语音播报阶段名;默认关(会外放,使用场景多在公共/半公共环境)
+  coachCue: true,                   // 训练中显示要领提示(别憋气 / 腹部放松 / 只用盆底发力)
+  breath: true,                     // 训练中显示呼吸节拍条(4s 吸 / 4s 呼)
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
 };
@@ -329,7 +331,32 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 
 页脚(所有 tab 可见区域底部、tab 栏上方):`仅供锻炼参考,不构成医疗建议`。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 57 个)
+### §8.y 训练中的教练层、计数口径、键盘与过渡
+
+**计数口径(`#set-progress` 的文案分支)**:一次收缩在「收紧(或维持)结束」的那一刻计入 `completedReps`,同时 `repIndex` 立刻指向下一次。所以放松期间 `repIndex` 已经是下一次的下标了 —— 此时若照报「第 N 次」会让人误以为下一次已经开始。文案按阶段分支:
+
+| 阶段 | 文案 |
+|---|---|
+| idle / done | 今日状态(如 `连续 5 天 · 今天还没练`) |
+| prepare | `准备开始 · 共 {sets} 组 × {reps} 次` |
+| contract / hold | `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次` |
+| relax | `第 {setIndex+1}/{sets} 组 · 已完成 {repIndex}/{repsPerSet} 次` |
+| rest | `休息中 · 即将开始第 {setIndex+1} 组` |
+
+注意每组最后一次收缩之后**没有放松段**(直接进 rest/done),所以每组有 `repsPerSet-1` 次放松——这正是 `totalDurationSec` 里 `sets*(reps-1)*relax` 的由来。
+
+**要领提示 `#coach-cue`**(`settings.coachCue`,默认开):按阶段显示短要领,维持段有 3 条按 `CUE_ROTATE_MS`(2600ms)轮播。轮播下标由「本阶段已过去多久」算出(`phaseDuration - remainingInPhaseMs`),**不另起定时器**,因此暂停时自然停住。文案与知识页同源(Mayo Clinic / NHS)。憋气是凯格尔最常见的错误且会抬高腹压,而知识页在训练途中没人会去看——所以要领必须出现在正在盯着的这块屏幕上。
+
+**呼吸节拍 `#breath`**(`settings.breath`,默认开):`BREATH_CYCLE_MS = 8000`(4s 吸 / 4s 呼),从 `breathAnchorMs` 算相位,开始与恢复时重置锚点(暂停期间不该「凭空呼吸了几轮」)。视觉上刻意比总进度条更细、无渐变、低饱和——它表达节奏而非进度,撞脸会被误读。
+
+**键盘**:空格 = 开始 / 暂停 / 继续。设置弹窗打开时、或焦点在 `input/textarea/select/button/a`、可编辑元素上时不拦截(按钮上的空格是浏览器原生的「激活」,拦了会触发两次);其余情况 `preventDefault` 掉默认的翻页。
+
+**阶段过渡**:阶段边界上「生硬」的来源是颜色与相位环的硬切,而非缩放。
+- 圆的底色改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.55s`。
+- `--ring` / `--ring-color` / `--ring-track` 用 `@property` 注册后才能补间,否则相位环每次换阶段都从 0% 硬跳回 100%。`--ring` 的过渡要短(.15s),它同时也在平滑每 100ms 一次的写入,太长会明显滞后。不支持 `@property` 的浏览器退回硬切,不影响功能。
+- 阶段名与要领换字时重放一次淡入动画(`restartAnimation()`:置 `animation:none` → 强制回流 → 复原)。
+
+### §8.x DOM id 总表(app.js 实际引用的全部 63 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -340,10 +367,11 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 | tab 与面板 | `tab-train` `tab-stats` `tab-knowledge` `panel-train` `panel-stats` `panel-knowledge` |
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
 | 引导圆与进度 | `coach-ring` `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
+| 训练中的教练层 | `coach-cue` `breath` `breath-label` `breath-bar` |
 | 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-clear` |
-| 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-coach-cue` `opt-breath` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
 
 ## §9 PWA(sw.js + manifest.webmanifest + icon.svg + icon-*.png)
 
@@ -351,7 +379,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v2'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+- sw.js:`CACHE_NAME='tigang-v3'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)
@@ -378,5 +406,12 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 4. **UI 单屏化与重做**:方案卡默认折叠;新增相位环 `#coach-ring`;顶栏常驻连续天数芯片;统计页新增徽章墙;完成面板重做(`#done-streak` 改名 `#done-streak-num`);设置开关从原生 checkbox 换成自绘 `.switch`;布局改 flex + `min-height: calc(100dvh - …)` 保证单屏不滚动。
 5. **应用图标**:新增 `tools/make-icons.mjs` 零依赖手写 PNG 编码器,生成 4 个尺寸的图标并提交进仓库,解决 iOS 主屏图标退化成文字缩写的问题。
 6. **sw.js**:`CACHE_NAME` 升到 `tigang-v2`,预缓存清单加 `core/achievements.js` 与 4 个图标 PNG。
+
+紧随其后的一轮修订(`CACHE_NAME` → `tigang-v3`):
+
+7. **训练中的教练层**:新增要领提示 `#coach-cue` 与呼吸节拍 `#breath`(各自一个设置开关,默认开)——解决「维持时间一长就不知道怎么用劲、开始憋气」。见 §8.y。
+8. **计数口径修正**:放松期间不再报「第 N 次」(那时 `repIndex` 已指向下一次,读着像下一次已开始),改报「已完成 N 次」;prepare 阶段也给了独立文案。见 §8.y。
+9. **空格键** = 开始 / 暂停 / 继续。
+10. **阶段过渡平滑**:圆的底色改 `background-color` 以支持补间,相位环三个自定义属性用 `@property` 注册后才能补间——此前颜色与环都是硬切,即「衔接生硬」的来源。见 §8.y。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起。

@@ -383,6 +383,27 @@ body {
 }
 
 /*
+ * 注册这三个自定义属性,浏览器才肯对它们做补间 —— 否则阶段切换时
+ * 相位环会从 0% 硬跳回 100%、颜色硬切,正是「衔接生硬」的来源。
+ * 不支持 @property 的老浏览器只是回到硬切,不影响功能。
+ */
+@property --ring {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 100;
+}
+@property --ring-color {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: rgba(15, 155, 142, .5);
+}
+@property --ring-track {
+  syntax: '<color>';
+  inherits: false;
+  initial-value: rgba(15, 155, 142, .1);
+}
+
+/*
  * 相位环 = 当前阶段的剩余时间,顺时针从 12 点开始消耗。
  * 它和圆是兄弟节点(不是父子):圆要跟着呼吸缩放,环必须保持固定尺寸才读得出时间。
  */
@@ -398,7 +419,8 @@ body {
   -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
   mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
   opacity: 1;
-  transition: opacity .35s ease;
+  /* --ring 的补间要短:它同时也在平滑每 100ms 一次的倒计时写入,太长会明显滞后 */
+  transition: opacity .35s ease, --ring .15s linear, --ring-color .5s ease, --ring-track .5s ease;
   pointer-events: none;
 }
 
@@ -421,13 +443,19 @@ body {
   width: 200px;
   height: 200px;
   border-radius: 50%;
-  background: linear-gradient(160deg, #7fc9c0, #4bb3a7);
+  /*
+   * 底色用 background-color(可过渡),立体感交给一层固定不变的叠加渐变。
+   * v1 每个阶段各写一条 linear-gradient —— 渐变之间无法补间,所以颜色是硬切的。
+   */
+  background-color: #4bb3a7;
+  background-image: linear-gradient(160deg, rgba(255, 255, 255, .17), rgba(0, 0, 0, .13));
   color: #fff;
   box-shadow: 0 10px 30px rgba(15, 155, 142, .25);
   transform: scale(1);
-  transition-property: transform;
-  transition-duration: .4s;
-  transition-timing-function: cubic-bezier(.37, 0, .63, 1);
+  transition-property: transform, background-color, color, box-shadow;
+  /* transform 的时长由 JS 按阶段秒数改写;颜色始终用固定的 .55s 跨过边界 */
+  transition-duration: .4s, .55s, .55s, .55s;
+  transition-timing-function: cubic-bezier(.37, 0, .63, 1), ease, ease, ease;
   will-change: transform;
 }
 
@@ -456,19 +484,19 @@ body {
  */
 /* 空闲态底色浅,白字几乎看不清 —— 这里换成深色文字 */
 .coach-circle[data-phase="idle"] {
-  background: linear-gradient(160deg, #d5e7e4, #b3d2cc);
+  background-color: #c4dcd8;
   box-shadow: 0 8px 24px rgba(28, 43, 42, .1);
   color: #486a66;
 }
-.coach-circle[data-phase="prepare"] { background: linear-gradient(160deg, #86cfc5, #43ab9f); }
-.coach-circle[data-phase="contract"] { background: linear-gradient(160deg, #14a294, #0a736a); }
+.coach-circle[data-phase="prepare"]  { background-color: #5cbdb0; }
+.coach-circle[data-phase="contract"] { background-color: #0f8d80; }
 .coach-circle[data-phase="hold"] {
-  background: linear-gradient(160deg, #0b6b62, #053b36);
-  box-shadow: 0 10px 30px rgba(11, 107, 98, .32);
+  background-color: #07514a;
+  box-shadow: 0 10px 30px rgba(7, 81, 74, .34);
 }
-.coach-circle[data-phase="relax"] { background: linear-gradient(160deg, #6fc9bd, #35a99c); }
-.coach-circle[data-phase="rest"] { background: linear-gradient(160deg, #9ecfbf, #63b09f); }
-.coach-circle[data-phase="done"] { background: linear-gradient(160deg, #12a89a, #0b7d73); }
+.coach-circle[data-phase="relax"] { background-color: #52b8ab; }
+.coach-circle[data-phase="rest"]  { background-color: #7fbfae; }
+.coach-circle[data-phase="done"]  { background-color: #0e9084; }
 
 .phase-label {
   font-size: 17px;
@@ -476,6 +504,13 @@ body {
   letter-spacing: .26em;
   text-indent: .26em;
   opacity: .95;
+  /* 阶段名换字时淡入,别硬闪 */
+  animation: phase-in .34s ease-out;
+}
+
+@keyframes phase-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: .95; transform: none; }
 }
 
 .countdown {
@@ -487,6 +522,64 @@ body {
 }
 
 /* ---------------- 进度 ---------------- */
+
+/* ---------------- 训练中的要领提示 / 呼吸节拍 ---------------- */
+
+/*
+ * 憋气是凯格尔最常见的错误,而知识页没人会在训练途中切过去看 ——
+ * 所以要领必须出现在正在看的这块屏幕上。只在训练中显示,空闲时完全不占位。
+ */
+.coach-cue {
+  margin: 0 0 6px;
+  min-height: 1.5em;
+  text-align: center;
+  font-size: 13.5px;
+  color: var(--teal-dark);
+  animation: cue-in .32s ease-out;
+}
+
+@keyframes cue-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.breath {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 必须显式 width:100% —— 列向 flex 容器里的 margin:0 auto 会让它退化成 fit-content,
+     那样 flex:1 的轨道(自身无内容)就被压成 0 宽,只剩「吸气」两个字 */
+  width: 100%;
+  max-width: 260px;
+  margin: 0 auto 8px;
+}
+
+.breath-label {
+  flex: none;
+  width: 2.6em;
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: .08em;
+}
+
+/*
+ * 刻意做得比总进度条「轻」:更细、无渐变、低饱和。
+ * 它表达的是节奏而不是进度,和下方那条鲜亮的总进度条撞脸会让人误读。
+ */
+.breath-track {
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: #e6edeb;
+  overflow: hidden;
+}
+
+.breath-bar {
+  width: 0%;
+  height: 100%;
+  border-radius: 999px;
+  background: #a3c3bd;
+}
 
 .set-progress {
   margin: 0 0 8px;
@@ -993,7 +1086,9 @@ body {
   }
   /* 相位环是逐帧写入的数值,不是动画,减弱动效时保留 —— 它是唯一还能表达「还剩多久」的视觉线索 */
   .coach-circle.is-pulsing::after { animation: none; opacity: .35; }
-  .badge-row .badge { animation: none; }
+  .badge-row .badge,
+  .phase-label { animation: none; }
+  .breath-bar { transition: none; }
   .progress-bar,
   .mini-bar { transition: none; }
 }
@@ -1002,10 +1097,15 @@ body {
   .countdown { font-size: 62px; }
 }
 
-/* 极矮屏(如 iPhone SE 横向浏览器栏占位后)优先保住引导圆完整可见 */
+/*
+ * 极矮屏(如 iPhone SE、或浏览器地址栏占位后)优先保住「圆 + 要领 + 呼吸 + 按钮」全部可见。
+ * 注意这里必须覆盖 min-height:基础规则用的是 min-height + flex:1,只改 height 是不起作用的。
+ */
 @media (max-height: 700px) {
-  .coach { height: 214px; }
-  .coach-circle { width: 176px; height: 176px; }
-  .coach-ring { width: 208px; height: 208px; }
-  .countdown { font-size: 50px; }
+  .coach { min-height: 186px; }
+  .coach-circle { width: 168px; height: 168px; }
+  .coach-ring { width: 198px; height: 198px; }
+  .countdown { font-size: 46px; }
+  .phase-label { font-size: 15px; }
+  .coach-cue { font-size: 12.5px; }
 }

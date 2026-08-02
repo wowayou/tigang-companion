@@ -106,7 +106,7 @@
                   <span>秒</span>
                 </span>
               </div>
-              <p class="hint">开启后每次循环变成 收紧 → 维持 → 放松 三段,对所有方案都生效。</p>
+              <p class="hint">开启后每次循环变成 收紧 → 维持 → 放松 三段,对所有方案都生效。<br>建议从 3-5 秒起步:能全程正常呼吸、腹部不发紧,再往上加 —— 憋着气硬撑会抬高腹压,反而帮倒忙。</p>
             </div>
           </div>
         </div>
@@ -119,6 +119,13 @@
           </div>
         </div>
 
+        <p class="coach-cue" id="coach-cue" aria-live="polite" hidden></p>
+
+        <div class="breath" id="breath" hidden>
+          <span class="breath-label" id="breath-label">吸气</span>
+          <div class="breath-track"><div class="breath-bar" id="breath-bar"></div></div>
+        </div>
+
         <p class="set-progress" id="set-progress"></p>
 
         <div class="progress-track" role="presentation">
@@ -126,8 +133,8 @@
         </div>
 
         <div class="controls">
-          <button type="button" class="btn btn-primary" id="btn-start">开始训练</button>
-          <button type="button" class="btn btn-ghost" id="btn-pause" disabled>暂停</button>
+          <button type="button" class="btn btn-primary" id="btn-start" title="空格键">开始训练</button>
+          <button type="button" class="btn btn-ghost" id="btn-pause" title="空格键" disabled>暂停</button>
           <button type="button" class="btn btn-ghost" id="btn-stop" disabled>结束</button>
         </div>
 
@@ -290,6 +297,16 @@
     <label class="opt-row">
       <span class="opt-text">语音播报</span>
       <input type="checkbox" id="opt-voice" class="switch">
+    </label>
+
+    <label class="opt-row">
+      <span class="opt-text">要领提示</span>
+      <input type="checkbox" id="opt-coach-cue" class="switch">
+    </label>
+
+    <label class="opt-row">
+      <span class="opt-text">呼吸节拍</span>
+      <input type="checkbox" id="opt-breath" class="switch">
     </label>
 
     <label class="opt-row">

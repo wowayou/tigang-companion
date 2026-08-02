@@ -54,6 +54,10 @@ const el = {
 
   coachRing: $('coach-ring'),
   coachCircle: $('coach-circle'),
+  coachCue: $('coach-cue'),
+  breath: $('breath'),
+  breathLabel: $('breath-label'),
+  breathBar: $('breath-bar'),
   phaseLabel: $('phase-label'),
   countdown: $('countdown'),
   setProgress: $('set-progress'),
@@ -88,6 +92,8 @@ const el = {
   dlgSettings: $('dlg-settings'),
   optSound: $('opt-sound'),
   optVoice: $('opt-voice'),
+  optCoachCue: $('opt-coach-cue'),
+  optBreath: $('opt-breath'),
   optVibration: $('opt-vibration'),
   optReminderEnabled: $('opt-reminder-enabled'),
   optReminderTime: $('opt-reminder-time'),
@@ -116,6 +122,25 @@ const PHASE_SPEECH = {
   done: '完成',
 };
 
+/*
+ * 训练中的要领提示。憋气是凯格尔最常见的错误(也最容易让训练白做:腹压反而升高),
+ * 而这些要领只写在知识页没用 —— 没人会在维持到第 6 秒时切过去看。
+ * 维持段有多条,按 CUE_ROTATE_MS 轮播;其余阶段各一条。
+ * 内容与知识页同源(Mayo Clinic / NHS 盆底肌训练公开建议)。
+ */
+const COACH_CUES = {
+  prepare: ['像忍住排便那样,准备向上提'],
+  contract: ['呼气,慢慢向上提起'],
+  hold: ['正常呼吸,别憋气', '腹部、大腿、臀部放松', '只用盆底发力'],
+  relax: ['完全松开,别提前收紧'],
+  rest: ['歇一会儿,正常呼吸'],
+};
+
+const CUE_ROTATE_MS = 2600;
+
+// 呼吸节拍:4 秒吸 + 4 秒呼。慢而稳,目的是压住「憋着」的本能,不是练呼吸技巧。
+const BREATH_CYCLE_MS = 8000;
+
 const METRIC_UNIT = {
   bestStreak: '天',
   activeDays: '天',
@@ -142,6 +167,10 @@ let voicePrimed = false;
 let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
 // 空闲态那行提示里要显示连续天数,但 renderTrain 每 100ms 跑一次,不能每次都去算统计
 let idleHintText = '';
+// 呼吸周期的起点;开始/恢复时重置,免得暂停期间「凭空呼吸了几轮」
+let breathAnchorMs = 0;
+// 当前显示的要领文案,用于判断是否需要换字(避免每 100ms 都写 DOM)
+let currentCueText = '';
 
 /* ------------------------------------------------------------------ *
  * 小工具
@@ -345,8 +374,18 @@ function animateCircle(phase, durationSec) {
   // 维持期间圆不动,靠内圈高光的脉动表示「还在用力」
   circle.classList.toggle('is-pulsing', phase === 'hold');
   circle.classList.remove('is-paused');
-  circle.style.transitionDuration = `${Math.max(0, durationSec)}s`;
+  // 四个值依次对应 transform / background-color / color / box-shadow:
+  // 只有缩放跟着阶段秒数走,配色一律用固定的 .55s 平滑跨过边界
+  circle.style.transitionDuration = `${Math.max(0, durationSec)}s, .55s, .55s, .55s`;
   circle.style.transform = `scale(${targetScale(phase)})`;
+  restartAnimation(el.phaseLabel);
+}
+
+/** 重放元素上的 CSS 动画(改文字时用来淡入,而不是硬闪)。 */
+function restartAnimation(node) {
+  node.style.animation = 'none';
+  void node.offsetWidth; // 强制回流,否则浏览器会把去掉再加上合并成「没变」
+  node.style.animation = '';
 }
 
 function enterPhaseVisual(state) {
@@ -362,7 +401,7 @@ function enterPhaseVisual(state) {
 function freezeCircle() {
   const circle = el.coachCircle;
   const current = window.getComputedStyle(circle).transform;
-  circle.style.transitionDuration = '0s';
+  circle.style.transitionDuration = '0s, .55s, .55s, .55s';
   circle.style.transform = current && current !== 'none' ? current : 'scale(1)';
   circle.classList.add('is-paused');
 }
@@ -440,10 +479,17 @@ function renderTrain() {
 
   const running = isRunning(s);
 
+  // 计数口径:一次收缩在「收紧(+维持)结束」的那一刻记完成,同时 repIndex 跳到下一次。
+  // 所以放松期间 repIndex 已经指向下一次了 —— 这时报「第 N 次」会让人以为下一次已经开始,
+  // 改成报已完成数(此时 repIndex 恰好等于刚做完那次的 1 基序号)。
   if (!running) {
     el.setProgress.textContent = idleHintText;
   } else if (s.phase === 'rest') {
     el.setProgress.textContent = `休息中 · 即将开始第 ${s.setIndex + 1} 组`;
+  } else if (s.phase === 'prepare') {
+    el.setProgress.textContent = `准备开始 · 共 ${c.sets} 组 × ${c.repsPerSet} 次`;
+  } else if (s.phase === 'relax') {
+    el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 已完成 ${s.repIndex}/${c.repsPerSet} 次`;
   } else {
     el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 第 ${s.repIndex + 1}/${c.repsPerSet} 次`;
   }
@@ -453,6 +499,8 @@ function renderTrain() {
   const ringPct = running && phaseMs > 0 ? (remainingInPhaseMs(s, now) / phaseMs) * 100 : 0;
   el.coachRing.dataset.phase = s.phase;
   el.coachRing.style.setProperty('--ring', ringPct.toFixed(1));
+
+  renderCoaching(s, now);
 
   const pct = Math.min(100, Math.max(0, overallProgress(s, now) * 100));
   el.overallBar.style.width = `${pct.toFixed(2)}%`;
@@ -511,6 +559,41 @@ function renderStats() {
   el.heatmap.appendChild(frag);
 }
 
+/** 训练中的要领提示与呼吸节拍;两者都只在训练进行时出现,空闲时完全不占位。 */
+function renderCoaching(state, nowMs) {
+  const running = isRunning(state);
+
+  const cues = running && data.settings.coachCue ? COACH_CUES[state.phase] : null;
+  if (!cues || cues.length === 0) {
+    el.coachCue.hidden = true;
+    currentCueText = '';
+  } else {
+    // 用「本阶段已过去多久」算轮播下标,不另起定时器,暂停时自然停住
+    const phaseMs = phaseDurationSec(state.config, state.phase) * 1000;
+    const elapsed = Math.max(0, phaseMs - remainingInPhaseMs(state, nowMs));
+    const text = cues[Math.floor(elapsed / CUE_ROTATE_MS) % cues.length];
+    el.coachCue.hidden = false;
+    if (text !== currentCueText) {
+      currentCueText = text;
+      el.coachCue.textContent = text;
+      restartAnimation(el.coachCue);
+    }
+  }
+
+  if (!running || !data.settings.breath) {
+    el.breath.hidden = true;
+    return;
+  }
+  el.breath.hidden = false;
+  const half = BREATH_CYCLE_MS / 2;
+  const t = ((nowMs - breathAnchorMs) % BREATH_CYCLE_MS + BREATH_CYCLE_MS) % BREATH_CYCLE_MS;
+  const inhaling = t < half;
+  const ratio = inhaling ? t / half : 1 - (t - half) / half;
+  el.breathBar.style.width = `${(ratio * 100).toFixed(1)}%`;
+  const label = inhaling ? '吸气' : '呼气';
+  if (el.breathLabel.textContent !== label) el.breathLabel.textContent = label;
+}
+
 function renderBadges(today) {
   const ev = evaluate(data.records, today);
 
@@ -536,6 +619,8 @@ function renderBadges(today) {
 function renderSettingsForm() {
   el.optSound.checked = !!data.settings.sound;
   el.optVoice.checked = !!data.settings.voice;
+  el.optCoachCue.checked = !!data.settings.coachCue;
+  el.optBreath.checked = !!data.settings.breath;
   el.optVibration.checked = !!data.settings.vibration;
   el.optReminderEnabled.checked = !!data.settings.reminder.enabled;
   el.optReminderTime.value = data.settings.reminder.time || '21:00';
@@ -680,7 +765,9 @@ el.btnStart.addEventListener('click', () => {
   }
   if (session.phase !== 'idle') return;
 
-  session = start(session, Date.now());
+  const now = Date.now();
+  breathAnchorMs = now;
+  session = start(session, now);
   cueFor(session.phase);
   enterPhaseVisual(session);
   requestWakeLock();
@@ -692,6 +779,7 @@ el.btnPause.addEventListener('click', () => {
   const now = Date.now();
   if (session.paused) {
     session = resume(session, now);
+    breathAnchorMs = now; // 暂停期间不该「凭空呼吸了几轮」,恢复时重新起头
     syncCircleToRemaining(session);
     startLoop();
   } else {
@@ -816,6 +904,19 @@ el.optVoice.addEventListener('change', () => {
   else stopSpeaking();
 });
 
+el.optCoachCue.addEventListener('change', () => {
+  data.settings.coachCue = el.optCoachCue.checked;
+  persist();
+  renderTrain(); // 立即生效,不必等下一个阶段
+});
+
+el.optBreath.addEventListener('change', () => {
+  data.settings.breath = el.optBreath.checked;
+  persist();
+  breathAnchorMs = Date.now(); // 重新打开时从「吸气」起头,别接在半途
+  renderTrain();
+});
+
 el.optVibration.addEventListener('change', () => {
   data.settings.vibration = el.optVibration.checked;
   persist();
@@ -915,6 +1016,28 @@ el.btnClear.addEventListener('click', () => {
   scheduleReminder();
   resetSession();
   renderStats();
+});
+
+/* ------------------------------------------------------------------ *
+ * 键盘:空格 = 开始 / 暂停 / 继续
+ * ------------------------------------------------------------------ */
+
+document.addEventListener('keydown', (event) => {
+  if (event.code !== 'Space' && event.key !== ' ') return;
+  if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (el.dlgSettings.open) return;
+
+  // 输入框里空格就是空格;按钮/链接上空格是浏览器原生的「激活」,交给它,别按两次
+  const t = event.target;
+  if (t instanceof HTMLElement) {
+    const tag = t.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON' || tag === 'A') return;
+    if (t.isContentEditable) return;
+  }
+
+  event.preventDefault(); // 空格默认会翻页
+  if (isRunning(session)) el.btnPause.click();
+  else el.btnStart.click();
 });
 
 /* ------------------------------------------------------------------ *

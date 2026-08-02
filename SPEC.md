@@ -157,8 +157,6 @@ export const DEFAULT_SETTINGS = {
   holdSec: 0,                       // 「维持」阶段秒数,0=关闭;全局值,叠加在任何方案(含 custom)之上
   sound: true,
   voice: false,                     // 语音播报阶段名;默认关(会外放,使用场景多在公共/半公共环境)
-  coachCue: true,                   // 训练中显示要领提示(别憋气 / 腹部放松 / 只用盆底发力)
-  breath: true,                     // 训练中显示呼吸节拍条(4s 吸 / 4s 呼)
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
 };
@@ -267,10 +265,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - 方案选择:5 个 radio(name="preset",value 为 beginner/standard/advanced/quick/custom)渲染成胶囊按钮;选 custom 时显示自定义面板(number 输入:`#cfg-contract` `#cfg-relax` `#cfg-reps` `#cfg-sets` `#cfg-rest`,范围与 §3 一致,不含 prepareSec/holdSec 输入)。方案变更即持久化到 settings 并 reset 会话;训练进行中禁用方案切换。
 - **维持开关**:`#opt-hold-enabled`(iOS 风格开关,见下方 `.switch` 说明)控制全局 `settings.holdSec` 是否 >0;展开秒数输入 `#hold-sec-wrap`(内含 `#cfg-hold`,范围 1-60,与 §3 一致)。关闭开关时记住上一次输入的秒数,重新打开不必再输一遍。holdSec 是**全局设置**而非 custom 的字段(见 §5)——四个预设与自定义方案共用同一个「维持」开关。
 
-**引导圆**:结构上 `#coach-ring`(相位环)与 `#coach-circle`(引导圆)是**兄弟节点**而非父子——圆要缩放、环必须保持固定尺寸,父子关系会让环跟着一起缩水。
-- `#coach-circle`:直径约 200px 的圆,内部上方 `#phase-label`(待开始/准备/收紧/维持/放松/休息/完成),中间大号 `#countdown`(当前阶段剩余秒,`Math.ceil(remainingInPhaseMs/1000)`;idle/done 态显示 `—`)。动画:CSS `transform: scale()` + `transition`,JS 在进入阶段时把 `transitionDuration` 设为该阶段秒数;`contract`/`hold` 缩到 0.62(维持阶段圆停在收紧到位的尺寸不动,靠内圈高光脉动表示"还在用力"),`relax`/`rest`/`prepare`/`idle`/`done` 回到 1。
-- `#coach-ring`:环绕引导圆的 `conic-gradient` 圆环,表示**当前阶段剩余时间比例**;JS 每 100ms(与 tick 同频)直接写 CSS 自定义属性 `--ring`(百分比数值),**不使用 CSS transition** ——暂停/切后台再切回时用 `remainingInPhaseMs` 重算的比例天然对得上,不会有过渡动画倒退或跳变。配色按用力程度排列;`hold` 阶段是唯一的暖色(琥珀)环 + 最深的墨绿圆,其余阶段为主色 teal 深浅变化。idle/done 态整个环淡出(`opacity:0`)。
-- 进度:`#set-progress`。运行中文案 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `准备好就开始`(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。总进度条 `#overall-bar`(宽度=overallProgress)。
+**引导圆 `#coach-circle`**:- 进度:`#set-progress`。运行中文案 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `准备好就开始`(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。总进度条 `#overall-bar`(宽度=overallProgress)。
 
 - 按钮:`#btn-start`(开始训练,done 态文案变为"再来一次")、`#btn-pause`(暂停/继续,文案随态切换)、`#btn-stop`(结束)。驱动:`setInterval` 100ms,`next = tick(state, Date.now())`;**阶段推进**(phase 或 setIndex/repIndex 任一变化——`restSec=0` 时跨组是 contract→contract,仅比较 phase 会漏一拍)时触发提示音/语音/震动 + 圆与环重新进入动画;done 时写入记录并展示完成面板 `#done-panel`。
 - `#btn-stop` 训练中点击 → `confirm('确定结束本次训练?')`;若 `completedReps>0` 以 `finished:false` 记录后 reset。
@@ -345,22 +340,14 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 
 注意每组最后一次收缩之后**没有放松段**(直接进 rest/done),所以每组有 `repsPerSet-1` 次放松——这正是 `totalDurationSec` 里 `sets*(reps-1)*relax` 的由来。
 
-**要领提示 `#coach-cue`**(`settings.coachCue`,默认开):按阶段显示短要领,维持段有 3 条按 `CUE_ROTATE_MS`(2600ms)轮播。轮播下标由「本阶段已过去多久」算出(`phaseDuration - remainingInPhaseMs`),**不另起定时器**,因此暂停时自然停住。文案与知识页同源(Mayo Clinic / NHS)。憋气是凯格尔最常见的错误且会抬高腹压,而知识页在训练途中没人会去看——所以要领必须出现在正在盯着的这块屏幕上。
-
-**呼吸节拍 `#breath`**(`settings.breath`,默认开):`BREATH_CYCLE_MS = 8000`(4s 吸 / 4s 呼),从 `breathAnchorMs` 算相位,开始与恢复时重置锚点(暂停期间不该「凭空呼吸了几轮」)。视觉上刻意比总进度条更细、无渐变、低饱和——它表达节奏而非进度,撞脸会被误读。
-
-**呼吸与训练阶段必须解耦(硬约束)**:`COACH_CUES` 里**不得出现「吸气」「呼气」等指定呼吸相位的文案**。理由是原理性的——维持段可能长达数十秒,期间必须正常呼吸好几轮,所以呼吸相位**无法**与训练阶段同步;任何「呼气时收紧」式的提示一遇到维持段就自相矛盾,还会和独立运行的呼吸节拍条直接打架(v3 曾出现 contract 提示「呼气,慢慢向上提起」而节拍条同时显示「吸气」)。这也与知识页的「收紧时正常呼吸、不要憋气」一致。要领里关于呼吸只说一句「别憋气 / 保持呼吸」,节奏交给节拍条。
-
 **键盘**:空格 = 开始 / 暂停 / 继续。设置弹窗打开时、或焦点在 `input/textarea/select/button/a`、可编辑元素上时不拦截(按钮上的空格是浏览器原生的「激活」,拦了会触发两次);其余情况 `preventDefault` 掉默认的翻页。
 
 **阶段过渡**:原则是**边界上只让一样东西在动**。
 
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
-- 相位环的**轨道色跨阶段保持不变**(只换弧的颜色):轨道是整场训练里唯一穿越所有边界都不变的元素,留作视觉锚点。
-- 相位环的 `--ring` 与配色**一律瞬时**,不要过渡。曾用 `@property` 注册后给它们补间,结果更差:环从空「扫」回满是一段抢眼的运动,青→琥珀的插值还会经过浑浊的橄榄色,再叠上圆变色与阶段名淡入 —— 边界上同时四样东西在动,比硬切更扎眼。阶段切换本就有提示音与文字同时到达,此刻的瞬时变化是被预期的。
-- 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。要领 `#coach-cue` 同理(`.22s`,从 `.3` 起)。两者都靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
+- 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 63 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 56 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -370,12 +357,11 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 | 顶栏 | `btn-settings` `streak-chip` `streak-chip-num` |
 | tab 与面板 | `tab-train` `tab-stats` `tab-knowledge` `panel-train` `panel-stats` `panel-knowledge` |
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
-| 引导圆与进度 | `coach-ring` `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
-| 训练中的教练层 | `coach-cue` `breath` `breath-label` `breath-bar` |
+| 引导圆与进度 | `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
 | 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-clear` |
-| 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-coach-cue` `opt-breath` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
 
 ## §9 PWA(sw.js + manifest.webmanifest + icon.svg + icon-*.png)
 
@@ -383,7 +369,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v5'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+- sw.js:`CACHE_NAME='tigang-v6'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)
@@ -418,4 +404,8 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 9. **空格键** = 开始 / 暂停 / 继续。
 10. **阶段过渡平滑**:圆的底色改 `background-color` 以支持补间,相位环三个自定义属性用 `@property` 注册后才能补间——此前颜色与环都是硬切,即「衔接生硬」的来源。见 §8.y。
 
-详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起。
+再一轮修订(`CACHE_NAME` → `tigang-v6`):
+
+11. **撤销相位环与教练层**(第 4、7 条中的对应部分,以及第 10 条里环的补间):经实际使用后判定为噪音,已整体移除 —— `#coach-ring`、`#coach-cue`、`#breath` 三组元素与 `settings.coachCue`/`settings.breath` 两个设置项全部删除。**上面第 4、7、10 条中关于相位环与教练层的描述均已失效,仅作历史记录保留**;当前正文(§8)才是准据。训练页现在回到:引导圆(缩放 + 配色)+ 倒计时 + 组次进度 + 总进度条。阶段剩余时间只由圆内的倒计时数字表达。
+
+详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

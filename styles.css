@@ -382,42 +382,6 @@ body {
   margin: 2px 0 4px;
 }
 
-/*
- * 相位环 = 当前阶段的剩余时间,顺时针从 12 点开始消耗。
- * 它和圆是兄弟节点(不是父子):圆要跟着呼吸缩放,环必须保持固定尺寸才读得出时间。
- */
-.coach-ring {
-  --ring: 100;
-  --ring-color: rgba(15, 155, 142, .72);
-  --ring-track: rgba(15, 155, 142, .12);
-  position: absolute;
-  width: 236px;
-  height: 236px;
-  border-radius: 50%;
-  background: conic-gradient(var(--ring-color) calc(var(--ring) * 1%), var(--ring-track) 0);
-  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
-  mask: radial-gradient(closest-side, transparent calc(100% - 7px), #000 calc(100% - 7px));
-  opacity: 1;
-  /*
-   * 只过渡 opacity。环的重置与配色一律瞬时 —— 试过用 @property 给它们补间,反而更糟:
-   * 环从空「扫」回满是一段抢眼的运动,青→琥珀的插值还会经过浑浊的橄榄色,
-   * 再叠上圆变色和阶段名淡入,边界上同时四样东西在动。
-   * 阶段切换本来就有提示音和文字同时到达,此刻的瞬时变化是被预期的,不算突兀。
-   */
-  transition: opacity .35s ease;
-  pointer-events: none;
-}
-
-/* 未开始/已结束没有「剩余时间」可言,环收起来 */
-.coach-ring[data-phase="idle"],
-.coach-ring[data-phase="done"] { opacity: 0; }
-
-/*
- * 只换弧的颜色,轨道保持不变 —— 轨道是整场训练里唯一跨越所有边界都不变的元素,
- * 留着它当视觉锚点,阶段之间才不像是各自独立的画面。
- */
-.coach-ring[data-phase="hold"] { --ring-color: var(--flame); }
-
 .coach-circle {
   position: relative;
   display: flex;
@@ -515,64 +479,6 @@ body {
 }
 
 /* ---------------- 进度 ---------------- */
-
-/* ---------------- 训练中的要领提示 / 呼吸节拍 ---------------- */
-
-/*
- * 憋气是凯格尔最常见的错误,而知识页没人会在训练途中切过去看 ——
- * 所以要领必须出现在正在看的这块屏幕上。只在训练中显示,空闲时完全不占位。
- */
-.coach-cue {
-  margin: 0 0 6px;
-  min-height: 1.5em;
-  text-align: center;
-  font-size: 13.5px;
-  color: var(--teal-dark);
-  animation: cue-in .22s ease-out;
-}
-
-@keyframes cue-in {
-  from { opacity: .3; }
-  to   { opacity: 1; }
-}
-
-.breath {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* 必须显式 width:100% —— 列向 flex 容器里的 margin:0 auto 会让它退化成 fit-content,
-     那样 flex:1 的轨道(自身无内容)就被压成 0 宽,只剩「吸气」两个字 */
-  width: 100%;
-  max-width: 260px;
-  margin: 0 auto 8px;
-}
-
-.breath-label {
-  flex: none;
-  width: 2.6em;
-  font-size: 12px;
-  color: var(--muted);
-  letter-spacing: .08em;
-}
-
-/*
- * 刻意做得比总进度条「轻」:更细、无渐变、低饱和。
- * 它表达的是节奏而不是进度,和下方那条鲜亮的总进度条撞脸会让人误读。
- */
-.breath-track {
-  flex: 1;
-  height: 3px;
-  border-radius: 999px;
-  background: #e6edeb;
-  overflow: hidden;
-}
-
-.breath-bar {
-  width: 0%;
-  height: 100%;
-  border-radius: 999px;
-  background: #a3c3bd;
-}
 
 .set-progress {
   margin: 0 0 8px;
@@ -1081,7 +987,6 @@ body {
   .coach-circle.is-pulsing::after { animation: none; opacity: .35; }
   .badge-row .badge,
   .phase-label { animation: none; }
-  .breath-bar { transition: none; }
   .progress-bar,
   .mini-bar { transition: none; }
 }
@@ -1097,8 +1002,6 @@ body {
 @media (max-height: 700px) {
   .coach { min-height: 186px; }
   .coach-circle { width: 168px; height: 168px; }
-  .coach-ring { width: 198px; height: 198px; }
   .countdown { font-size: 46px; }
   .phase-label { font-size: 15px; }
-  .coach-cue { font-size: 12.5px; }
 }

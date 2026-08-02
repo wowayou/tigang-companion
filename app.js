@@ -52,12 +52,7 @@ const el = {
   holdSecWrap: $('hold-sec-wrap'),
   cfgHold: $('cfg-hold'),
 
-  coachRing: $('coach-ring'),
   coachCircle: $('coach-circle'),
-  coachCue: $('coach-cue'),
-  breath: $('breath'),
-  breathLabel: $('breath-label'),
-  breathBar: $('breath-bar'),
   phaseLabel: $('phase-label'),
   countdown: $('countdown'),
   setProgress: $('set-progress'),
@@ -92,8 +87,6 @@ const el = {
   dlgSettings: $('dlg-settings'),
   optSound: $('opt-sound'),
   optVoice: $('opt-voice'),
-  optCoachCue: $('opt-coach-cue'),
-  optBreath: $('opt-breath'),
   optVibration: $('opt-vibration'),
   optReminderEnabled: $('opt-reminder-enabled'),
   optReminderTime: $('opt-reminder-time'),
@@ -122,30 +115,6 @@ const PHASE_SPEECH = {
   done: '完成',
 };
 
-/*
- * 训练中的要领提示。憋气是凯格尔最常见的错误(也最容易让训练白做:腹压反而升高),
- * 而这些要领只写在知识页没用 —— 没人会在维持到第 6 秒时切过去看。
- * 维持段有多条,按 CUE_ROTATE_MS 轮播;其余阶段各一条。
- * 内容与知识页同源(Mayo Clinic / NHS 盆底肌训练公开建议)。
- *
- * 【不要在这里写「吸气」「呼气」这类指定呼吸相位的话】
- * 呼吸与训练阶段在原理上无法同步:维持段可能长达数十秒,期间必须正常呼吸好几轮,
- * 任何「呼气时收紧」的提示一遇到维持段就自相矛盾,还会和下方独立运行的呼吸节拍打架。
- * 呼吸这件事只说一句「别憋气、保持呼吸」,节奏交给呼吸节拍条。
- */
-const COACH_CUES = {
-  prepare: ['像忍住排便那样,准备向上提'],
-  contract: ['慢慢向上提起,别屏气'],
-  hold: ['别憋气,保持呼吸', '腹部、大腿、臀部放松', '只用盆底发力'],
-  relax: ['完全松开,别提前收紧'],
-  rest: ['歇一会儿,保持呼吸'],
-};
-
-const CUE_ROTATE_MS = 2600;
-
-// 呼吸节拍:4 秒吸 + 4 秒呼。慢而稳,目的是压住「憋着」的本能,不是练呼吸技巧。
-const BREATH_CYCLE_MS = 8000;
-
 const METRIC_UNIT = {
   bestStreak: '天',
   activeDays: '天',
@@ -172,10 +141,6 @@ let voicePrimed = false;
 let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
 // 空闲态那行提示里要显示连续天数,但 renderTrain 每 100ms 跑一次,不能每次都去算统计
 let idleHintText = '';
-// 呼吸周期的起点;开始/恢复时重置,免得暂停期间「凭空呼吸了几轮」
-let breathAnchorMs = 0;
-// 当前显示的要领文案,用于判断是否需要换字(避免每 100ms 都写 DOM)
-let currentCueText = '';
 
 /* ------------------------------------------------------------------ *
  * 小工具
@@ -499,14 +464,6 @@ function renderTrain() {
     el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 第 ${s.repIndex + 1}/${c.repsPerSet} 次`;
   }
 
-  // 相位环 = 当前阶段剩余比例,逐帧写入(不用 CSS 过渡,暂停/后台切回时天然对得上)
-  const phaseMs = phaseDurationSec(c, s.phase) * 1000;
-  const ringPct = running && phaseMs > 0 ? (remainingInPhaseMs(s, now) / phaseMs) * 100 : 0;
-  el.coachRing.dataset.phase = s.phase;
-  el.coachRing.style.setProperty('--ring', ringPct.toFixed(1));
-
-  renderCoaching(s, now);
-
   const pct = Math.min(100, Math.max(0, overallProgress(s, now) * 100));
   el.overallBar.style.width = `${pct.toFixed(2)}%`;
 
@@ -564,41 +521,6 @@ function renderStats() {
   el.heatmap.appendChild(frag);
 }
 
-/** 训练中的要领提示与呼吸节拍;两者都只在训练进行时出现,空闲时完全不占位。 */
-function renderCoaching(state, nowMs) {
-  const running = isRunning(state);
-
-  const cues = running && data.settings.coachCue ? COACH_CUES[state.phase] : null;
-  if (!cues || cues.length === 0) {
-    el.coachCue.hidden = true;
-    currentCueText = '';
-  } else {
-    // 用「本阶段已过去多久」算轮播下标,不另起定时器,暂停时自然停住
-    const phaseMs = phaseDurationSec(state.config, state.phase) * 1000;
-    const elapsed = Math.max(0, phaseMs - remainingInPhaseMs(state, nowMs));
-    const text = cues[Math.floor(elapsed / CUE_ROTATE_MS) % cues.length];
-    el.coachCue.hidden = false;
-    if (text !== currentCueText) {
-      currentCueText = text;
-      el.coachCue.textContent = text;
-      restartAnimation(el.coachCue);
-    }
-  }
-
-  if (!running || !data.settings.breath) {
-    el.breath.hidden = true;
-    return;
-  }
-  el.breath.hidden = false;
-  const half = BREATH_CYCLE_MS / 2;
-  const t = ((nowMs - breathAnchorMs) % BREATH_CYCLE_MS + BREATH_CYCLE_MS) % BREATH_CYCLE_MS;
-  const inhaling = t < half;
-  const ratio = inhaling ? t / half : 1 - (t - half) / half;
-  el.breathBar.style.width = `${(ratio * 100).toFixed(1)}%`;
-  const label = inhaling ? '吸气' : '呼气';
-  if (el.breathLabel.textContent !== label) el.breathLabel.textContent = label;
-}
-
 function renderBadges(today) {
   const ev = evaluate(data.records, today);
 
@@ -624,8 +546,6 @@ function renderBadges(today) {
 function renderSettingsForm() {
   el.optSound.checked = !!data.settings.sound;
   el.optVoice.checked = !!data.settings.voice;
-  el.optCoachCue.checked = !!data.settings.coachCue;
-  el.optBreath.checked = !!data.settings.breath;
   el.optVibration.checked = !!data.settings.vibration;
   el.optReminderEnabled.checked = !!data.settings.reminder.enabled;
   el.optReminderTime.value = data.settings.reminder.time || '21:00';
@@ -771,7 +691,6 @@ el.btnStart.addEventListener('click', () => {
   if (session.phase !== 'idle') return;
 
   const now = Date.now();
-  breathAnchorMs = now;
   session = start(session, now);
   cueFor(session.phase);
   enterPhaseVisual(session);
@@ -784,7 +703,6 @@ el.btnPause.addEventListener('click', () => {
   const now = Date.now();
   if (session.paused) {
     session = resume(session, now);
-    breathAnchorMs = now; // 暂停期间不该「凭空呼吸了几轮」,恢复时重新起头
     syncCircleToRemaining(session);
     startLoop();
   } else {
@@ -907,19 +825,6 @@ el.optVoice.addEventListener('change', () => {
   persist();
   if (data.settings.voice) primeVoice();
   else stopSpeaking();
-});
-
-el.optCoachCue.addEventListener('change', () => {
-  data.settings.coachCue = el.optCoachCue.checked;
-  persist();
-  renderTrain(); // 立即生效,不必等下一个阶段
-});
-
-el.optBreath.addEventListener('change', () => {
-  data.settings.breath = el.optBreath.checked;
-  persist();
-  breathAnchorMs = Date.now(); // 重新打开时从「吸气」起头,别接在半途
-  renderTrain();
 });
 
 el.optVibration.addEventListener('change', () => {

@@ -112,18 +112,10 @@
         </div>
 
         <div class="coach">
-          <div class="coach-ring" id="coach-ring" data-phase="idle" aria-hidden="true"></div>
           <div class="coach-circle" id="coach-circle" data-phase="idle">
             <span class="phase-label" id="phase-label" aria-live="polite">待开始</span>
             <span class="countdown" id="countdown" aria-hidden="true">—</span>
           </div>
-        </div>
-
-        <p class="coach-cue" id="coach-cue" aria-live="polite" hidden></p>
-
-        <div class="breath" id="breath" hidden>
-          <span class="breath-label" id="breath-label">吸气</span>
-          <div class="breath-track"><div class="breath-bar" id="breath-bar"></div></div>
         </div>
 
         <p class="set-progress" id="set-progress"></p>
@@ -297,16 +289,6 @@
     <label class="opt-row">
       <span class="opt-text">语音播报</span>
       <input type="checkbox" id="opt-voice" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">要领提示</span>
-      <input type="checkbox" id="opt-coach-cue" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">呼吸节拍</span>
-      <input type="checkbox" id="opt-breath" class="switch">
     </label>
 
     <label class="opt-row">

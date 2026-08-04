@@ -179,24 +179,14 @@ body {
 /* ---------------- 隐私 / 免责 ---------------- */
 
 .privacy,
-.migrate,
 .disclaimer {
   max-width: 640px;
   margin: 0 auto;
   padding: 24px 20px;
 }
-.privacy h2,
-.migrate h2 { margin: 0 0 10px; font-size: 18px; }
+.privacy h2 { margin: 0 0 10px; font-size: 18px; }
 .privacy p,
-.migrate p,
 .disclaimer p { margin: 0; font-size: 14px; color: var(--muted); }
-.migrate code {
-  padding: 1px 6px;
-  border-radius: 6px;
-  background: var(--teal-soft);
-  color: var(--teal-dark);
-  font-size: 13px;
-}
 
 .disclaimer {
   padding-top: 4px;

@@ -19,6 +19,11 @@
  *   {"type":"stats","online":n,"doing":m,"visits":v}
  *   (连接建立、任一计数变化、以及周期广播时推送)
  *
+ * 关键实现约束:`ctx.acceptWebSocket(server)` 启用的是 WebSocket Hibernation API,
+ * 消息必须由类方法 webSocketMessage / webSocketClose / webSocketError 接收,
+ * 在 server 上 addEventListener('message') 不会触发(2024-08 实测踩坑:客户端帧
+ * 全部静默丢弃,「在做」人数永远为 0)。
+ *
  * 部署:见 worker/README.md。免费额度对个人站绰绰有余。
  */
 
@@ -79,40 +84,9 @@ export class Presence {
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    const session = { training: false, lastSeen: Date.now() };
-    this.sessions.set(server, session);
+    this.sessions.set(server, { training: false, lastSeen: Date.now() });
 
-    server.addEventListener('message', (event) => {
-      const s = this.sessions.get(server);
-      if (!s) return;
-      s.lastSeen = Date.now();
-      let msg;
-      try {
-        msg = JSON.parse(String(event.data));
-      } catch {
-        return;
-      }
-      if (msg.type === 'training') {
-        const on = !!msg.on;
-        if (s.training !== on) {
-          s.training = on;
-          this.broadcast(); // 有人在训练/结束训练,立刻广播
-        }
-      }
-    });
-
-    server.addEventListener('close', () => {
-      this.sessions.delete(server);
-      this.broadcast();
-    });
-    server.addEventListener('error', () => {
-      try {
-        server.close();
-      } catch {
-        /* 已关闭 */
-      }
-    });
-
+    // Hibernation API:accept 后不再用 addEventListener,消息走类方法 webSocketMessage
     this.ctx.acceptWebSocket(server);
     this.ensureBroadcastTimer();
     // 让新连接尽快拿到当前数;同时把自身训练状态带上去
@@ -120,8 +94,47 @@ export class Presence {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  /** Hibernation API 的消息入口(替代 addEventListener('message'))。 */
+  async webSocketMessage(ws, message) {
+    // DO 可能被休眠后唤醒,内存里的 sessions 会清空:来一条消息就把它认回来
+    let s = this.sessions.get(ws);
+    if (!s) {
+      s = { training: false, lastSeen: Date.now() };
+      this.sessions.set(ws, s);
+    }
+    s.lastSeen = Date.now();
+    let msg;
+    try {
+      msg = JSON.parse(String(message));
+    } catch {
+      return;
+    }
+    if (msg.type === 'training') {
+      const on = !!msg.on;
+      if (s.training !== on) {
+        s.training = on;
+        this.broadcast(); // 有人在训练/结束训练,立刻广播
+      }
+    }
+  }
+
+  /** Hibernation API 的连接关闭入口(替代 addEventListener('close'))。 */
+  async webSocketClose(ws, code, reason, wasClean) {
+    this.sessions.delete(ws);
+    this.broadcast();
+  }
+
+  async webSocketError(ws, error) {
+    try {
+      ws.close();
+    } catch {
+      /* 已关闭 */
+    }
+  }
+
   ensureBroadcastTimer() {
     if (this.broadcastTimer !== null) return;
+    // 休眠期间 setInterval 会暂停;真正的正确性靠「连接/变化即广播」保证,周期广播只是兜底
     this.broadcastTimer = setInterval(() => this.broadcast(), STATS_INTERVAL_MS);
   }
 

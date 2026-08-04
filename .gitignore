@@ -7,3 +7,6 @@ node_modules/
 
 # 部署组装产物(tools/build-site.mjs 生成,CI 会重建)
 dist/
+
+# wrangler 本地开发状态(worker/.wrangler 由 wrangler dev 生成)
+worker/.wrangler/

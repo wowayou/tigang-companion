@@ -72,6 +72,11 @@ const el = {
   doneNext: $('done-next'),
   doneUnlocked: $('done-unlocked'),
   doneBadges: $('done-badges'),
+  btnShare: $('btn-share'),
+  dlgShare: $('dlg-share'),
+  shareImg: $('share-img'),
+  btnSaveShare: $('btn-save-share'),
+  btnShareClose: $('btn-share-close'),
 
   streakNum: $('streak-num'),
   todayGoal: $('today-goal'),
@@ -150,6 +155,8 @@ let voicePrimed = false;
 let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
 // 空闲态那行提示里要显示连续天数,但 renderTrain 每 100ms 跑一次,不能每次都去算统计
 let idleHintText = '';
+// 最近一次完成的训练,供「分享今天的成果」画卡片用(reps / streak / 日期)
+let shareData = null;
 
 /* ------------------------------------------------------------------ *
  * 小工具
@@ -643,6 +650,7 @@ function finishSession() {
 
   const ev = evaluate(data.records, today);
   el.doneStreakNum.textContent = String(ev.metrics.streak);
+  shareData = { reps: record.completedReps, streak: ev.metrics.streak, dateStr: today };
 
   // 完成的这一刻最容易被「再来一天就解锁」推着走,所以把下一枚连续徽章摆在这里
   const nextStreak = ev.nextByMetric.bestStreak;
@@ -678,6 +686,148 @@ function resetSession() {
   renderTrain();
   syncTrainingFlag();
 }
+
+/* ------------------------------------------------------------------ *
+ * 训练成果分享卡(N1:完成面板「分享」)
+ * 纯内存 canvas 绘制,不引入任何新依赖;画完转 PNG 走系统分享或预览保存。
+ * ------------------------------------------------------------------ */
+
+const SHARE_CARD_W = 1080;
+const SHARE_CARD_H = 1440;
+const CARD_FONT =
+  '-apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif';
+
+/** 画成果卡(1080×1440,品牌 teal 底 + 同心圆环 + 今日次数 + 连续天数)。 */
+async function drawShareCard() {
+  try {
+    await document.fonts.ready; // 等系统字体就绪,数字用粗体才不会回退成默认
+  } catch {
+    /* 旧浏览器没有 document.fonts,用默认字体继续 */
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = SHARE_CARD_W;
+  canvas.height = SHARE_CARD_H;
+  const ctx = canvas.getContext('2d');
+  const cx = SHARE_CARD_W / 2;
+
+  // 背景:品牌 teal 渐变
+  const grad = ctx.createLinearGradient(0, 0, 0, SHARE_CARD_H);
+  grad.addColorStop(0, '#0b7d73');
+  grad.addColorStop(1, '#0f9b8e');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, SHARE_CARD_W, SHARE_CARD_H);
+
+  // 顶部同心圆环(呼应应用图标的三层收缩示意)
+  ctx.strokeStyle = 'rgba(255,255,255,.30)';
+  ctx.lineWidth = 8;
+  for (const r of [58, 96, 134]) {
+    ctx.beginPath();
+    ctx.arc(cx, 200, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(cx, 200, 30, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,.85)';
+  ctx.fill();
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(255,255,255,.92)';
+  ctx.font = `600 54px ${CARD_FONT}`;
+  ctx.fillText('提肛陪伴 · KegelMate', cx, 410);
+  ctx.fillStyle = 'rgba(255,255,255,.58)';
+  ctx.font = `400 32px ${CARD_FONT}`;
+  ctx.fillText('每天两分钟,把盆底肌练成肌肉记忆', cx, 478);
+
+  // 主数字:「今日收缩 X 次」,数字粗、单位小
+  const reps = shareData ? shareData.reps : 0;
+  const numStr = String(reps);
+  const baseY = 940;
+  ctx.textAlign = 'left';
+  ctx.font = `800 300px ${CARD_FONT}`;
+  const numW = ctx.measureText(numStr).width;
+  ctx.font = `600 92px ${CARD_FONT}`;
+  const unitW = ctx.measureText('次').width;
+  const gap = 30;
+  const totalW = numW + gap + unitW;
+  const left = cx - totalW / 2;
+  ctx.fillStyle = 'rgba(255,255,255,.9)';
+  ctx.font = `400 42px ${CARD_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.fillText('今日收缩', cx, 660);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = `800 300px ${CARD_FONT}`;
+  ctx.fillText(numStr, left, baseY);
+  ctx.font = `600 92px ${CARD_FONT}`;
+  ctx.fillText('次', left + numW + gap, baseY);
+
+  // 连续天数:全局唯一的暖调,和站内火苗一致
+  const streak = shareData ? shareData.streak : 0;
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#ffd9a8';
+  ctx.font = `700 64px ${CARD_FONT}`;
+  ctx.fillText(`连续打卡 ${streak} 天`, cx, 1140);
+
+  // 底部:诚实文案 + 日期
+  ctx.fillStyle = 'rgba(255,255,255,.75)';
+  ctx.font = `500 36px ${CARD_FONT}`;
+  ctx.fillText('免费 · 无广告 · 数据只在本地', cx, 1300);
+  ctx.fillStyle = 'rgba(255,255,255,.45)';
+  ctx.font = `400 30px ${CARD_FONT}`;
+  ctx.fillText(shareData ? shareData.dateStr : '', cx, 1368);
+
+  return canvas;
+}
+
+/** 分享按钮:能分享文件就走系统分享,否则弹预览(长按保存 / 下载)。 */
+el.btnShare.addEventListener('click', async () => {
+  if (!shareData) return;
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      drawShareCard().then((canvas) => {
+        canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob 失败'))), 'image/png');
+      }, reject);
+    });
+    const file = new File([blob], 'kegel-card.png', { type: 'image/png' });
+    // Android Chrome 等支持分享文件 → 直接调起系统分享(用户手势内,优先走这里)
+    if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          files: [file],
+          title: '提肛陪伴 · 今日成果',
+          text: `今天我完成了 ${shareData.reps} 次凯格尔训练,连续第 ${shareData.streak} 天!`,
+        });
+        return;
+      } catch (err) {
+        if (err.name === 'AbortError') return; // 用户取消,什么都不做
+        // 其它失败(如没有可分享的应用)→ 落到下面的预览
+      }
+    }
+    // 降级:iOS Safari 不支持分享文件 → 预览卡片,长按保存 / 「保存图片」下载
+    el.shareImg.src = URL.createObjectURL(blob);
+    if (typeof el.dlgShare.showModal === 'function') el.dlgShare.showModal();
+  } catch {
+    /* 静默:分享失败不影响训练本身 */
+  }
+});
+
+el.btnSaveShare.addEventListener('click', () => {
+  if (!el.shareImg.src) return;
+  const a = document.createElement('a');
+  a.href = el.shareImg.src;
+  a.download = 'kegel-card.png';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+});
+
+el.btnShareClose.addEventListener('click', () => {
+  if (typeof el.dlgShare.close === 'function') el.dlgShare.close();
+  if (el.shareImg.src) {
+    URL.revokeObjectURL(el.shareImg.src);
+    el.shareImg.src = '';
+  }
+});
 
 /* ------------------------------------------------------------------ *
  * 事件:训练控制

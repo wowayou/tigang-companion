@@ -661,6 +661,26 @@ body {
   gap: 8px;
 }
 
+/* 完成面板里的分享按钮:与「解锁新徽章」同风格的分隔 */
+.done-share {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--teal-line);
+}
+
+.done-share .hint {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+}
+
+.share-preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 12px 0;
+  border-radius: 12px;
+}
+
 .badge-row .badge {
   animation: badge-pop .5s cubic-bezier(.2, 1.5, .4, 1) both;
 }

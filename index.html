@@ -145,6 +145,11 @@
             <p class="done-unlocked-title">解锁新徽章</p>
             <div class="badge-row" id="done-badges"></div>
           </div>
+
+          <div class="done-share">
+            <button type="button" class="btn btn-primary" id="btn-share">分享今天的成果</button>
+            <p class="hint">画一张成果卡,发给朋友一起练;支持分享 / 保存。</p>
+          </div>
         </div>
 
       </section>
@@ -325,6 +330,16 @@
       <button type="button" class="btn btn-primary" id="import-merge">合并</button>
       <button type="button" class="btn btn-danger" id="import-replace">替换</button>
       <button type="button" class="btn btn-ghost" id="import-cancel">取消</button>
+    </div>
+  </dialog>
+
+  <dialog class="dlg" id="dlg-share" aria-label="分享训练成果">
+    <h2 class="dlg-title">分享今天的成果</h2>
+    <p class="hint">iOS 上长按图片即可保存到相册;其它设备点「保存图片」。</p>
+    <img class="share-preview" id="share-img" alt="训练成果卡片">
+    <div class="dlg-actions">
+      <button type="button" class="btn btn-primary" id="btn-save-share">保存图片</button>
+      <button type="button" class="btn btn-ghost" id="btn-share-close">关闭</button>
     </div>
   </dialog>
 

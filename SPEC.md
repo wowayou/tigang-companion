@@ -298,6 +298,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - `#done-streak-num` 当前连续天数(**v1 的 `#done-streak` 已改名为 `#done-streak-num`**);
 - `#done-next-bar` 进度条(宽度 = 下一枚连续类徽章的 progress)+ `#done-next` 文案(如 `再连续 2 天解锁「一周不断」`;连续类徽章已全部解锁则显示对应完结文案);
 - `#done-unlocked`(本次新解锁徽章的外层容器,无解锁时 `hidden`)+ `#done-badges`(徽章行,新解锁徽章带弹出动画)。新解锁的判定:写入记录前后各取一次 `unlockedIds` 快照,`newlyUnlocked(before, after)` 求差集。
+- `#btn-share` 分享按钮(ROADMAP N1):`finishSession` 把 `{ reps, streak, dateStr }` 存进模块级 `shareData`;点击后 `drawShareCard()` 在内存 canvas 画 1080×1440 成果卡(品牌 teal 渐变 + 同心圆环 + 今日收缩次数 + 连续天数 + 免责),转 PNG Blob → `navigator.canShare({files})` 支持就直接系统分享(Android Chrome),否则弹 `#dlg-share` 预览(iOS 长按保存 / `#btn-save-share` 下载)。零新依赖,canvas 不占任何 DOM id。
 
 **提示音**(方向性设计,关闭语音也能靠耳朵分辨该干什么):懒创建 AudioContext(**必须在 start 按钮的点击处理器里创建/resume**,规避自动播放限制);sine 波、gain 0.05:
   - `prepare` 单音 587Hz;
@@ -369,7 +370,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 65 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 70 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -381,7 +382,8 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
 | 引导圆与进度 | `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
 | 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
-| 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` |
+| 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` |
+| 分享弹窗 | `dlg-share` `share-img` `btn-save-share` `btn-share-close` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
 | 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
@@ -404,7 +406,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v9'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/sw.js + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
+- sw.js:`CACHE_NAME='tigang-v11'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/sw.js + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)

@@ -50,6 +50,7 @@ npx wrangler deploy   # 首次会创建 Durable Object
 ```
 
 无论哪种方式,部署完把打印的 `https://…workers.dev` 地址填进 `app.js` 的 `COUNTER_ORIGIN`,再发一版。详见 `worker/README.md`。
+当前已配置:`https://tigang-counter.eigentime.workers.dev`(已填入 app.js)。
 
 ## 之后加其他平台
 

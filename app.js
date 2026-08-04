@@ -1078,9 +1078,9 @@ document.addEventListener('visibilitychange', () => {
  * 隐私:不引任何第三方统计;只把随机访客 ID 与访问计数发往自己的 worker。
  * ------------------------------------------------------------------ */
 
-// 部署 worker 后把地址填这里(见 worker/README.md),例:'https://tigang-counter.xxx.workers.dev'。
+// 全站计数服务地址(自建 Cloudflare Worker,见 worker/README.md)。
 // 留空 = 关闭全站计数(顶栏那行安静显示「–」);离线时同样降级为「–」,不影响任何现有功能。
-const COUNTER_ORIGIN = '';
+const COUNTER_ORIGIN = 'https://tigang-counter.eigentime.workers.dev';
 const COUNTER_HEARTBEAT_MS = 10000;
 
 // 本地预览(localhost / 私网 / file://)不污染全站计数,但仍连 WS 看实时数

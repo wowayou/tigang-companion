@@ -153,6 +153,22 @@
 - **英文名与域名**:产品面向中文用户,主品牌仍是「提肛陪伴」;英文名 **KegelMate**(落地页 tagline 用,可一行换)。域名定为 `kegel.eigentime.org`(用户拍板,与英文名呼应,而非 pinyin)。
 - **重定向由 GitHub 自动完成**:自定义域名配置后,旧地址 `wowayou.github.io/tigang-companion/` 由 GitHub Pages 301 → `kegel.eigentime.org/`,项目不写重定向。这与 time-logger 不同(它用独立镜像仓库保留旧只读版)——我们同一 repo 服两个地址,无法留只读旧版;跨域名 localStorage 不通用,迁移靠导出/导入备份。落地页对 standalone 模式(老安装)直接跳进 `/app/`。
 
+### D28 计数 worker 的 WebSocket Hibernation 坑(2026-08-05)
+- **现象**:用户点「开始训练」后,顶栏「此刻多少人在做」仍显示 0。
+- **根因**:DO 里 `ctx.acceptWebSocket(server)` 启用的是 **WebSocket Hibernation API**,消息必须由类方法 `webSocketMessage` / `webSocketClose` / `webSocketError` 接收;在 server 上 `addEventListener('message')` **不会触发**,所有客户端帧(hello / training / ping)被静默丢弃——「在做」标记永远不生效,且 `lastSeen` 不更新、会话还被 pruneStale 当作掉线剔除。线上实测证据:原始 WS 客户端握手 101、周期广播正常、但发 training 帧后无任何广播,40s 后收到 `close(1000,'stale')` → 帧根本没进 DO 的 JS。
+- **修复**:改走 Hibernation API——`webSocketMessage(ws, message)` 处理 training(JSON.parse + 差量广播)与 ping(只刷 lastSeen),`webSocketClose(ws)` 移除会话并广播,`webSocketError` 兜底 close。会话注册仍用 `sessions` Map;DO 休眠唤醒后内存 Map 会清空,故 `webSocketMessage` 里「认不回会话就重建」。
+- **连带注意**:Hibernation 下 `setInterval` 休眠期暂停,周期广播只是兜底;正确性靠「连接/变化即广播」+ 客户端回前台 `fetchStats()` 保证。`sessions` 是内存态、DO 重启即清零,对个人站量级可接受。
+- **验证**:本地 `wrangler dev` 起 DO,原始 WS 客户端发 `training on:true` → 广播 `doing:1`,on→off→on 全链路正确;CI 重部署后线上 `/stats` 在训练会话存活期间返回 `doing:1`。
+- **同类陷阱**:改 worker 里任何 WebSocket 逻辑前,先确认走的是 Hibernation 类方法还是 addEventListener——两者不可混用。
+
+### D29 N1 训练完成分享卡(2026-08-05)
+- **做法**:完成面板加「分享今天的成果」,`drawShareCard()` 在内存 canvas 画 1080×1440 成果卡(品牌 teal 渐变 + 同心圆环 + 今日收缩次数 + 连续天数 + 免责文案)→ PNG Blob → `navigator.canShare({files})` 支持就直接系统分享(Android Chrome),否则弹 `#dlg-share` 预览:iOS 长按保存 / 桌面「保存图片」下载。零新依赖,canvas 不占任何 DOM id。
+- **关键取舍**:
+  - 用「图片卡」而非「文案 + 链接」:图片在社交平台更易被看到、被转发(N1 服务分享裂变);文案只作 `navigator.share` 的附加 text。
+  - 降级不用第三方分享 SDK(零依赖红线);iOS Safari 不支持分享文件,故预览弹窗兜底「长按保存」。
+  - 卡片文案诚实:底部「免费 · 无广告 · 数据只在本地」,不制造虚假社会证明(ROADMAP 原则)。
+- **验证**:headless Chromium 直接跑 `drawShareCard` 真实源码(从 app.js 按大括号配对抽取,避免手抄漂移),像素采样确认数字、连续天数、底部文案各带均渲染。
+
 ### D8 已知限制 / Backlog
 - **提醒**:无后端 ⇒ 无 Web Push;通知仅在页面打开时由 setTimeout 触发。iOS 需 16.4+ 且安装到主屏才有通知能力。若要可靠提醒,后续加个极简 push 服务或打包原生。
 - ~~图标仅 SVG~~:已解决(2026-08-02,见 D15)——补齐 180/192/512/512-maskable 四个 PNG,解决 iOS 主屏图标退化问题。

@@ -75,3 +75,69 @@ export function clearAll(storage = globalThis.localStorage) {
 export function exportJSON(data) {
   return JSON.stringify({ app: 'tigang-companion', version: 1, ...data }, null, 2);
 }
+
+/* ---------------- 导入备份 ---------------- */
+
+/** 备份里的记录逐条净化:dateStr 必须是 YYYY-MM-DD,数值取非负整数,非法字段归零。 */
+function sanitizeRecords(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((r) => isPlainObject(r) && typeof r.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.dateStr))
+    .map((r) => ({
+      dateStr: r.dateStr,
+      completedReps: nonNegInt(r.completedReps),
+      totalReps: nonNegInt(r.totalReps),
+      durationSec: nonNegInt(r.durationSec),
+      finished: r.finished === true,
+    }));
+}
+
+function nonNegInt(value) {
+  const n = Math.trunc(Number(value));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * 解析并校验备份 JSON 文本(导出文件或手工 { records, settings })。
+ * 成功:{ ok:true, data:{ records, settings } };失败:{ ok:false, error }。
+ * settings 走 mergeSettings(自动补新默认键),records 逐条净化。
+ */
+export function parseBackup(text) {
+  if (typeof text !== 'string' || !text.trim()) return { ok: false, error: '文件为空' };
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: '不是合法的 JSON 文件' };
+  }
+  if (!isPlainObject(parsed)) return { ok: false, error: '不是提肛陪伴的备份文件' };
+  if (!Array.isArray(parsed.records) && !isPlainObject(parsed.settings)) {
+    return { ok: false, error: '备份里既没有打卡记录,也没有设置' };
+  }
+  return {
+    ok: true,
+    data: {
+      records: sanitizeRecords(parsed.records),
+      settings: mergeSettings(parsed.settings),
+    },
+  };
+}
+
+/** 记录指纹:同一行记录重复导入不重复入库。 */
+function recordKey(r) {
+  return `${r.dateStr}|${r.completedReps}|${r.totalReps}|${r.durationSec}|${r.finished ? 1 : 0}`;
+}
+
+/** 合并记录:保留 existing,只追加 imported 中指纹全新的记录。 */
+export function mergeRecords(existing, imported) {
+  const out = Array.isArray(existing) ? existing.slice() : [];
+  const seen = new Set(out.map(recordKey));
+  for (const r of Array.isArray(imported) ? imported : []) {
+    const key = recordKey(r);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push(r);
+    }
+  }
+  return out;
+}

@@ -1,20 +1,23 @@
 # CLAUDE.md
 
 提肛(凯格尔)训练陪伴 PWA。零依赖、无构建、无后端,数据全在 localStorage。
+唯一的例外是顶栏那行「此刻多少人在做 · 总访问」的全站计数:它走自建 Cloudflare Worker + Durable Object(`worker/`,不引任何第三方统计服务),客户端逻辑全在 app.js,core/ 依旧纯函数。
 
 ## 命令
 
 ```bash
-npm test          # 裸 node --test(勿用 node --test tests/:Node 24 起目录参数会伪装成测试失败)— 改动 core/ 后必须跑
-npm run serve     # python3 -m http.server 8080
-git push          # push main → Actions 自动 npm test + 部署 GitHub Pages;发版要升 sw.js 的 CACHE_NAME(见 DEPLOY.md)
+npm test               # 裸 node --test(勿用 node --test tests/:Node 24 起目录参数会伪装成测试失败)— 改动 core/ 后必须跑
+npm run serve          # python3 -m http.server 8080
+node tools/build-site.mjs   # 组装部署目录 dist/(根=site/ 落地页,/app/=PWA);CI 会自动跑,本地预览可 -d dist
+git push               # push main → Actions 自动 npm test + 组装部署 + 自动部署计数 Worker;发版要升 sw.js 的 CACHE_NAME(见 DEPLOY.md)
 ```
 
 ## 架构
 
-- `core/` 纯函数层,四个模块:engine.js(训练状态机)、stats.js(打卡统计)、storage.js(存取)、achievements.js(成就徽章/今日目标)。**禁止**在 core/ 里访问 DOM、`Date.now()`、`localStorage`——时间与 storage 一律参数注入,这是可测性的根基。
-- `app.js` 唯一的胶水层:DOM、定时器、音频/语音/震动/通知都只在这里。
+- `core/` 纯函数层,四个模块:engine.js(训练状态机)、stats.js(打卡统计)、storage.js(存取+备份解析/合并)、achievements.js(成就徽章/今日目标)。**禁止**在 core/ 里访问 DOM、`Date.now()`、`localStorage`——时间与 storage 一律参数注入,这是可测性的根基。
+- `app.js` 唯一的胶水层:DOM、定时器、音频/语音/震动/通知、计数客户端、导入导出都只在这里。
 - 契约(函数签名、状态字段、DOM id)以 `SPEC.md` 为准;改接口必须同步改 SPEC + 两侧调用 + 测试。
+- 部署形态:根路径 = `site/` 落地页(不是 PWA 的一部分),`/app/` = PWA(由 `tools/build-site.mjs` 组装,运行时清单单一真源 = sw.js 的 `PRECACHE_URLS`)。改预缓存清单要同时注意组装脚本。
 
 ## 约定
 

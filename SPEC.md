@@ -25,8 +25,17 @@ tigang-companion/
 │   ├── stats.js          # 打卡/连续天数/热力图数据(纯函数)
 │   ├── storage.js        # localStorage 读写
 │   └── achievements.js   # 成就徽章 / 今日目标(纯函数)
+├── ROADMAP.md            # 增长机制路线图(产品向,不落代码;N 系列为准)
+├── site/                 # 落地页(部署到站点根路径;不是 PWA 的一部分,不进 sw.js 预缓存)
+│   ├── index.html
+│   └── styles.css
 ├── tools/
-│   └── make-icons.mjs    # 零依赖 PNG 图标生成脚本(一次性运行,产物提交进仓库)
+│   ├── make-icons.mjs    # 零依赖 PNG 图标生成脚本(一次性运行,产物提交进仓库)
+│   └── build-site.mjs    # 组装部署目录:根=site/,/app/=sw.js 预缓存清单(单一真源);CI 调用
+├── worker/               # 全站计数服务(Cloudflare Worker + Durable Object)
+│   ├── worker.js         # 部署源,不是被 PWA fetch 的静态资源 → 不加进 sw.js 预缓存
+│   ├── wrangler.toml
+│   └── README.md         # 部署步骤(一次性;部署后把地址填进 app.js 的 COUNTER_ORIGIN)
 └── tests/
     ├── engine.test.mjs
     ├── stats.test.mjs
@@ -173,6 +182,13 @@ export const DEFAULT_SETTINGS = {
 export function load(storage) {}
 export function save(data, storage) {}       // 成功 true,异常(如超配额)捕获后返回 false
 export function clearAll(storage) {}
+
+// 导入备份(纯函数,不碰 DOM/存储):
+// 解析校验备份 JSON。成功 { ok:true, data:{ records, settings } };失败 { ok:false, error }。
+// records 逐条净化:dateStr 必须 YYYY-MM-DD,数值取非负整数;settings 走 mergeSettings 补新默认键。
+export function parseBackup(text) {}
+// 合并记录:保留 existing,只追加 imported 中指纹(dateStr+三个数值+finished)全新的记录,返回新数组。
+export function mergeRecords(existing, imported) {}
 export function exportJSON(data) {}          // 返回 JSON.stringify({ app:'tigang-companion', version:1, ...data }, null, 2)
 ```
 
@@ -360,14 +376,27 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 
 | 分区 | id |
 |---|---|
-| 顶栏 | `btn-settings` `streak-chip` `streak-chip-num` |
+| 顶栏 | `btn-settings` `streak-chip` `streak-chip-num` `site-stats` `st-doing` `st-visits` |
 | tab 与面板 | `tab-train` `tab-stats` `tab-knowledge` `panel-train` `panel-stats` `panel-knowledge` |
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
 | 引导圆与进度 | `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
 | 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` |
-| 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-clear` |
+| 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
 | 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
+| 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
+
+### §8.z 全站计数(顶栏第二行:此刻在做人数 + 总访问)
+
+顶栏第二行 `.site-stats`(参考站样式,一行浅色小字):`此刻 <b id="st-doing">–</b> 人在做 · 总访问 <b id="st-visits">–</b>`。初始/离线显示 `–`,不阻塞任何现有功能。
+
+数据源是**自建 Cloudflare Worker + Durable Object**(`worker/`,部署见 `worker/README.md`),不引任何第三方统计服务(不用不蒜子等:那些会把访客 IP / 页面 URL 发给第三方,违反本项目的隐私基调)。
+
+- 客户端逻辑全部在 **app.js**(胶水层),不进 core/:随机 `visitorId` 存 localStorage(键 `tigang_visitor_id`,仅在无痕模式时静默降级);本地预览(`file://`/localhost/私网)不 POST `/visit` 污染全站计数,但仍连 WS 看实时数。
+- 状态上报:「在做」= `isRunning(session) && !session.paused`;在 `btnStart`/`btnPause`/`resetSession`/`finishSession` 四处调用 `syncTrainingFlag()` 做差量上报。
+- 网络:WS 心跳每 10s(`ping`),重连指数退避封顶 30s;`document.hidden` 时断开连接、回前台 `fetchStats()` + 重连;`pagehide` 关闭。
+- Worker 端点:`GET /stats` → `{ online, doing, visits }`;`POST /visit`(body `{ visitorId }`)→ `{ visits }`;`WS /ws` 双向协议见 `worker/worker.js` 顶部注释。CORS 全开。
+- `worker/` 三个文件是**部署源,不是被 PWA fetch 的静态资源**,不得加进 sw.js 预缓存清单(sw.js 只预缓存应用自身文件)。
 
 ## §9 PWA(sw.js + manifest.webmanifest + icon.svg + icon-*.png)
 
@@ -375,7 +404,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v7'`;install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/icon.svg + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。
+- sw.js:`CACHE_NAME='tigang-v9'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/sw.js + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)
@@ -413,5 +442,15 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 再一轮修订(`CACHE_NAME` → `tigang-v6`):
 
 11. **撤销相位环与教练层**(第 4、7 条中的对应部分,以及第 10 条里环的补间):经实际使用后判定为噪音,已整体移除 —— `#coach-ring`、`#coach-cue`、`#breath` 三组元素与 `settings.coachCue`/`settings.breath` 两个设置项全部删除。**上面第 4、7、10 条中关于相位环与教练层的描述均已失效,仅作历史记录保留**;当前正文(§8)才是准据。训练页现在回到:引导圆(缩放 + 配色)+ 倒计时 + 组次进度 + 总进度条。阶段剩余时间只由圆内的倒计时数字表达。
+
+再一轮修订(`CACHE_NAME` → `tigang-v8`):
+
+12. **全站计数**:顶栏第二行新增「此刻 X 人在做 · 总访问 Y」——「在做」= 正在训练中的实时人数(WebSocket + 心跳,自建 Cloudflare Worker + Durable Object,`worker/`),「总访问」= 累计页面访问(DO storage)。隐私上不引任何第三方统计;客户端随机 visitorId 只发往自己的 worker。实现见 §8.z,部署见 `worker/README.md`。
+
+再一轮修订(`CACHE_NAME` → `tigang-v9`):
+
+13. **数据导入 + 导出优化**:新增「导入备份」(合并 / 替换两档,`core/storage.js` 新增纯函数 `parseBackup` / `mergeRecords`);导出文件名带时间戳 `tigang-YYYYMMDD-HHmmss.json`,iOS 主屏 PWA 走 `navigator.share` 落盘(Blob + a.download 在 iOS 常不落盘)。
+14. **部署形态改为 落地页 + /app/**:新增 `site/` 落地页(根路径,品牌 KegelMate · 提肛陪伴)与 `tools/build-site.mjs` 组装脚本(根=site/,`/app/`=sw.js 预缓存清单,单一真源);GitHub Pages 部署 `dist/`,Workflow 新增 `deploy-worker` 自动部署计数 Worker(secrets 未配时优雅跳过)。自定义域名形态参考 time-logger:`https://…/app/` 放应用、根放落地页(见 DEPLOY.md)。
+15. **ROADMAP.md**:增长机制路线图(分享卡 / 第 N 位使用者 / 安装引导 / Web Push 等,分 Next/Mid/Gated),见 `ROADMAP.md`。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

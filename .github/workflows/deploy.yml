@@ -32,16 +32,39 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # 组装部署目录:根路径 = site/ 落地页,/app/ = PWA(清单单一真源 = sw.js 的 PRECACHE_URLS)
+      - name: Assemble site
+        run: node tools/build-site.mjs --out dist
       # 首次运行自动启用 Pages(Source = GitHub Actions)
       - uses: actions/configure-pages@v5
         with:
           enablement: true
-      # 纯静态、无构建:产物就是仓库根目录(.git/.github 会被自动排除)
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  # 之后要加其他部署目标(Cloudflare / Netlify / 自建服务器 rsync 等),
-  # 在此追加并列的 deploy-* job(needs: test),配方见 DEPLOY.md。
+  # 全站计数 Worker(Cloudflare Worker + Durable Object)。token 未配置时优雅跳过。
+  deploy-worker:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy counter worker
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: worker
+          command: deploy
+      - name: Report skip
+        if: env.CLOUDFLARE_API_TOKEN == '' || env.CLOUDFLARE_ACCOUNT_ID == ''
+        run: echo "未配置 CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID,跳过 Worker 自动部署(配置方法见 DEPLOY.md)"

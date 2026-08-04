@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>KegelMate · 提肛陪伴 — 每天两分钟,把盆底肌练成肌肉记忆</title>
+  <meta name="description" content="提肛(凯格尔/盆底肌)训练陪伴 PWA:节奏引导动画、打卡统计、成就徽章。数据只存本地,免费无广告,离线可用。">
+  <meta name="theme-color" content="#0f9b8e">
+  <link rel="icon" type="image/svg+xml" href="app/icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <header class="nav">
+    <span class="brand">提肛陪伴 <span class="en">KegelMate</span></span>
+    <a class="btn btn-ghost" href="./app/">打开应用</a>
+  </header>
+
+  <main>
+
+    <section class="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <span class="ring ring-1"></span><span class="ring ring-2"></span><span class="ring ring-3"></span>
+      </div>
+      <h1>每天两分钟,<br>把盆底肌练成肌肉记忆</h1>
+      <p class="hero-sub">节奏引导 · 打卡统计 · 成就徽章 —— 一个数据只存本机的凯格尔训练陪伴应用。</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="./app/">开始训练</a>
+        <a class="btn btn-ghost" href="#install">如何安装</a>
+      </div>
+      <p class="hero-note">此刻,已经有人在练</p>
+    </section>
+
+    <section class="features" aria-label="功能亮点">
+      <div class="feat">
+        <h3>节奏引导</h3>
+        <p>收紧 / 维持 / 放松三段,配方向性提示音与倒计时,闭着眼也能跟着做。</p>
+      </div>
+      <div class="feat">
+        <h3>打卡与连续</h3>
+        <p>每天一次,连续天数与热力图看得见;成就徽章激励你坚持。</p>
+      </div>
+      <div class="feat">
+        <h3>隐私本地</h3>
+        <p>所有记录只存在你的设备上,可随时导出备份;不引第三方统计。</p>
+      </div>
+      <div class="feat">
+        <h3>免费 · 无广告</h3>
+        <p>零依赖、零后端、零注册。安装到主屏后离线也能用。</p>
+      </div>
+    </section>
+
+    <section class="howto" id="install">
+      <h2>安装到主屏,像原生 App 一样用</h2>
+      <div class="steps">
+        <div class="step">
+          <span class="step-num">1</span>
+          <p><strong>iOS Safari</strong>:点击分享按钮 → 添加到主屏幕。</p>
+        </div>
+        <div class="step">
+          <span class="step-num">2</span>
+          <p><strong>Android Chrome</strong>:菜单 → 安装应用 / 添加到主屏幕。</p>
+        </div>
+        <div class="step">
+          <span class="step-num">3</span>
+          <p><strong>桌面浏览器</strong>:直接用,或地址栏旁的「安装」图标。</p>
+        </div>
+      </div>
+      <a class="btn btn-primary" href="./app/">现在就去练</a>
+    </section>
+
+    <section class="privacy">
+      <h2>隐私说明</h2>
+      <p>训练打卡数据只保存在本机浏览器,不会上传,可随时导出备份或清除。顶栏那行「此刻多少人在做 · 总访问」是全站计数,只向我们的计数服务上报一个随机 ID 和页面加载次数,不收集任何个人身份信息,也不经过任何第三方统计服务。</p>
+    </section>
+
+    <section class="migrate">
+      <h2>换了域名,旧记录还在吗</h2>
+      <p>浏览器按域名隔离数据,旧地址 <code>wowayou.github.io</code> 的记录不会自动跟到新域名,而且旧地址现在会直接跳转到本站。<br>如果你之前导出过备份文件,在应用里「统计 → 数据管理 → 导入备份」即可恢复;否则从今天开始记录也很好。</p>
+    </section>
+
+    <section class="disclaimer">
+      <p>训练方案参考 Mayo Clinic 与 NHS 的盆底肌训练公开建议。本应用仅供健康锻炼参考,不构成医疗建议;急性痔疮发作期、盆底肌过度紧张或术后恢复期请先咨询医生。</p>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <span>KegelMate · 提肛陪伴</span>
+    <a href="https://github.com/wowayou/tigang-companion" rel="noopener">开源项目</a>
+  </footer>
+
+  <script>
+    // 老安装的 PWA 打开本页时会以 standalone 模式进入 → 直接进 /app/,少一步手点。
+    // 普通浏览器 / 分享链接打开则正常展示落地页。
+    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone) {
+      location.replace('./app/');
+    }
+  </script>
+
+</body>
+</html>

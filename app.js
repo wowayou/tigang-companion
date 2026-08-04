@@ -18,7 +18,7 @@ import {
 } from './core/engine.js';
 import { localDateStr, makeRecord, computeStreak, totals, lastNDays } from './core/stats.js';
 import { evaluate, unlockedIds, newlyUnlocked, dailyGoal } from './core/achievements.js';
-import { load, save, clearAll, exportJSON } from './core/storage.js';
+import { load, save, clearAll, exportJSON, parseBackup, mergeRecords } from './core/storage.js';
 
 /* ------------------------------------------------------------------ *
  * DOM 引用
@@ -30,6 +30,8 @@ const el = {
   btnSettings: $('btn-settings'),
   streakChip: $('streak-chip'),
   streakChipNum: $('streak-chip-num'),
+  stDoing: $('st-doing'),
+  stVisits: $('st-visits'),
 
   tabTrain: $('tab-train'),
   tabStats: $('tab-stats'),
@@ -82,7 +84,14 @@ const el = {
   statDuration: $('stat-duration'),
   heatmap: $('heatmap'),
   btnExport: $('btn-export'),
+  btnImport: $('btn-import'),
+  fileImport: $('file-import'),
   btnClear: $('btn-clear'),
+  dlgImport: $('dlg-import'),
+  importSummary: $('import-summary'),
+  importMerge: $('import-merge'),
+  importReplace: $('import-replace'),
+  importCancel: $('import-cancel'),
 
   dlgSettings: $('dlg-settings'),
   optSound: $('opt-sound'),
@@ -656,6 +665,7 @@ function finishSession() {
   el.donePanel.hidden = false;
   // 用 center 而不是 nearest:底部 tab 栏是固定层,贴底对齐会把新解锁的徽章压在它下面
   el.donePanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  syncTrainingFlag();
 }
 
 function resetSession() {
@@ -666,6 +676,7 @@ function resetSession() {
   enterPhaseVisual(session);
   renderPlanSummary();
   renderTrain();
+  syncTrainingFlag();
 }
 
 /* ------------------------------------------------------------------ *
@@ -695,6 +706,7 @@ el.btnStart.addEventListener('click', () => {
   enterPhaseVisual(session);
   requestWakeLock();
   startLoop();
+  syncTrainingFlag();
   renderTrain();
 });
 
@@ -712,6 +724,7 @@ el.btnPause.addEventListener('click', () => {
       freezeCircle();
     }
   }
+  syncTrainingFlag();
   renderTrain();
 });
 
@@ -903,12 +916,38 @@ function scheduleReminder() {
  * 事件:数据导出 / 清除
  * ------------------------------------------------------------------ */
 
+function backupFileName() {
+  const now = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `tigang-${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}.json`;
+}
+
+function isIOSDevice() {
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent || '') ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 el.btnExport.addEventListener('click', () => {
-  const blob = new Blob([exportJSON(data)], { type: 'application/json' });
+  const json = exportJSON(data);
+  const fname = backupFileName();
+  // iOS 主屏 PWA 的 a.download 经常只发请求却不真正落盘 → 走系统分享面板让用户选「存储到文件」
+  let file = null;
+  try {
+    file = new File([json], fname, { type: 'application/json' });
+  } catch {
+    /* 旧浏览器无 File 构造器,走下面的 Blob 下载 */
+  }
+  if (file && isIOSDevice() && navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: fname }).catch(() => {});
+    return;
+  }
+  const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'tigang-data.json';
+  a.download = fname;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -926,6 +965,80 @@ el.btnClear.addEventListener('click', () => {
   resetSession();
   renderStats();
 });
+
+/* ------------------------------------------------------------------ *
+ * 事件:数据导入(合并 / 替换)
+ * ------------------------------------------------------------------ */
+
+let pendingImport = null;
+
+el.btnImport.addEventListener('click', () => {
+  if (el.fileImport) el.fileImport.click();
+});
+
+el.fileImport.addEventListener('change', async () => {
+  const file = el.fileImport.files[0];
+  el.fileImport.value = ''; // 允许连续选择同一个文件
+  if (!file) return;
+  let text;
+  try {
+    text = await file.text();
+  } catch {
+    window.alert('读取文件失败,请重试。');
+    return;
+  }
+  const result = parseBackup(text);
+  if (!result.ok) {
+    window.alert(`导入失败:${result.error}`);
+    return;
+  }
+  pendingImport = result.data;
+  const recs = result.data.records;
+  el.importSummary.textContent = recs.length
+    ? `备份里有 ${recs.length} 条打卡记录(${recs[0].dateStr} ~ ${recs[recs.length - 1].dateStr}),当前本机已有 ${data.records.length} 条。`
+    : `备份里没有打卡记录,只有设置。当前本机已有 ${data.records.length} 条记录。`;
+  if (typeof el.dlgImport.showModal === 'function') el.dlgImport.showModal();
+  else el.dlgImport.setAttribute('open', '');
+});
+
+el.dlgImport.addEventListener('close', () => {
+  pendingImport = null;
+});
+
+el.importMerge.addEventListener('click', () => {
+  const backup = pendingImport;
+  if (!backup) return;
+  const before = data.records.length;
+  data.records = mergeRecords(data.records, backup.records);
+  persist();
+  el.dlgImport.close();
+  afterDataImport();
+  window.alert(`已合并 ${data.records.length - before} 条新记录。`);
+});
+
+el.importReplace.addEventListener('click', () => {
+  const backup = pendingImport;
+  if (!backup) return;
+  data = { records: backup.records, settings: backup.settings };
+  lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
+  persist();
+  el.dlgImport.close();
+  afterDataImport();
+  window.alert(`已用备份替换本地数据(共 ${data.records.length} 条记录)。`);
+});
+
+el.importCancel.addEventListener('click', () => {
+  el.dlgImport.close();
+});
+
+/** 导入后统一刷新:设置表单 / 提醒 / 训练 / 统计。 */
+function afterDataImport() {
+  renderPresetForm();
+  renderSettingsForm();
+  scheduleReminder();
+  resetSession();
+  renderStats();
+}
 
 /* ------------------------------------------------------------------ *
  * 键盘:空格 = 开始 / 暂停 / 继续
@@ -961,6 +1074,185 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * 全站计数:「此刻多少人在做」+「总访问」(自建 Cloudflare Worker)
+ * 隐私:不引任何第三方统计;只把随机访客 ID 与访问计数发往自己的 worker。
+ * ------------------------------------------------------------------ */
+
+// 部署 worker 后把地址填这里(见 worker/README.md),例:'https://tigang-counter.xxx.workers.dev'。
+// 留空 = 关闭全站计数(顶栏那行安静显示「–」);离线时同样降级为「–」,不影响任何现有功能。
+const COUNTER_ORIGIN = '';
+const COUNTER_HEARTBEAT_MS = 10000;
+
+// 本地预览(localhost / 私网 / file://)不污染全站计数,但仍连 WS 看实时数
+const LOCAL_HOST_RE =
+  /^(localhost|0\.0\.0\.0|\[?::1\]?|(127|10)\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|169\.254\.\d+\.\d+|.+\.(local|localhost))$/;
+const IS_LOCAL = location.protocol === 'file:' || LOCAL_HOST_RE.test(location.hostname);
+const COUNTER_VID_KEY = 'tigang_visitor_id';
+
+const counter = {
+  ws: null,
+  retry: 0,
+  training: false,
+  visitSent: false,
+  visitorId: '',
+  heartbeatTimer: null,
+  reconnectTimer: null,
+
+  init() {
+    if (!COUNTER_ORIGIN) return; // 未部署:直接关闭计数
+    try {
+      this.visitorId = localStorage.getItem(COUNTER_VID_KEY) || '';
+      if (!this.visitorId) {
+        this.visitorId = crypto.randomUUID
+          ? crypto.randomUUID()
+          : Date.now().toString(36) + Math.random().toString(36).slice(2);
+        localStorage.setItem(COUNTER_VID_KEY, this.visitorId);
+      }
+    } catch {
+      this.visitorId = ''; // 无痕模式等:仍可看数,只是不参与访客计数
+    }
+
+    if (!IS_LOCAL) this.reportVisit();
+    this.fetchStats(); // 先拉一次初始值,WS 未通时也有数
+    this.connect();
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.closeWS(); // 后台不占连接
+      else {
+        this.fetchStats();
+        this.connect();
+      }
+    });
+    window.addEventListener('pagehide', () => this.closeWS());
+    // bfcache 恢复回来时 visibilitychange 不触发,这里兜底重连
+    window.addEventListener('pageshow', () => {
+      if (!document.hidden) {
+        this.fetchStats();
+        this.connect();
+      }
+    });
+  },
+
+  send(obj) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(JSON.stringify(obj));
+      } catch {
+        /* 忽略 */
+      }
+    }
+  },
+
+  async reportVisit() {
+    if (this.visitSent) return;
+    this.visitSent = true;
+    try {
+      await fetch(`${COUNTER_ORIGIN}/visit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ visitorId: this.visitorId }),
+        keepalive: true,
+      });
+    } catch {
+      /* 离线 / 未部署 → 静默 */
+    }
+  },
+
+  async fetchStats() {
+    try {
+      const res = await fetch(`${COUNTER_ORIGIN}/stats`);
+      if (res.ok) renderCounter(await res.json());
+    } catch {
+      /* 静默 */
+    }
+  },
+
+  connect() {
+    if (document.hidden || this.ws) return;
+    let sock;
+    try {
+      sock = new WebSocket(`${COUNTER_ORIGIN.replace(/^http/, 'ws')}/ws`);
+    } catch {
+      this.scheduleReconnect();
+      return;
+    }
+    this.ws = sock;
+
+    sock.addEventListener('open', () => {
+      this.retry = 0;
+      sock.send(JSON.stringify({ type: 'hello', visitorId: this.visitorId }));
+      if (this.training) sock.send(JSON.stringify({ type: 'training', on: true }));
+      this.startHeartbeat();
+    });
+    sock.addEventListener('message', (event) => {
+      try {
+        const m = JSON.parse(event.data);
+        if (m.type === 'stats') renderCounter(m);
+      } catch {
+        /* 忽略坏帧 */
+      }
+    });
+    sock.addEventListener('close', () => {
+      this.ws = null;
+      this.stopHeartbeat();
+      if (!document.hidden) this.scheduleReconnect();
+    });
+    sock.addEventListener('error', () => {
+      try {
+        sock.close();
+      } catch {
+        /* 已关闭 */
+      }
+    });
+  },
+
+  closeWS() {
+    this.stopHeartbeat();
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {
+        /* 忽略 */
+      }
+      this.ws = null;
+    }
+  },
+
+  scheduleReconnect() {
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => this.connect(), Math.min(30000, 1000 * 2 ** this.retry));
+    this.retry += 1;
+  },
+
+  startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(() => this.send({ type: 'ping' }), COUNTER_HEARTBEAT_MS);
+  },
+
+  stopHeartbeat() {
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  },
+};
+
+/** 训练状态变化 → 上报「在做」标记(服务端据此统计此刻多少人真在练)。暂停不算在做。 */
+function syncTrainingFlag() {
+  const doing = isRunning(session) && !session.paused;
+  if (doing === counter.training) return;
+  counter.training = doing;
+  counter.send({ type: 'training', on: doing });
+}
+
+function renderCounter(m) {
+  if (el.stDoing && typeof m.doing === 'number') el.stDoing.textContent = m.doing.toLocaleString('zh-Hans-CN');
+  if (el.stVisits && typeof m.visits === 'number') el.stVisits.textContent = m.visits.toLocaleString('zh-Hans-CN');
+}
+
+/* ------------------------------------------------------------------ *
  * 初始化
  * ------------------------------------------------------------------ */
 
@@ -972,6 +1264,7 @@ renderPlanSummary();
 renderStats();   // 先算统计:renderTrain 空闲态那行要用 idleHintText
 renderTrain();
 scheduleReminder();
+counter.init();  // 全站计数:此刻在做人数 + 总访问
 
 /* ------------------------------------------------------------------ *
  * Service Worker(http:// 或不支持时静默失败)

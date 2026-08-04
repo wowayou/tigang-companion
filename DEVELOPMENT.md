@@ -137,6 +137,22 @@
 - **副作用**:① 训练时长增加 `sets*relax`(新手 +6s、标准 +15s、进阶 +30s、快速 +2s);② 放松期间 `repIndex` 语义从「指向下一次」变成「指向刚做完的这次」,`#set-progress` 的已完成数改用 `repIndex+1`;③ 旧模型在 `restSec=0` 跨组时会出现 `contract→contract` 这种 phase 不变的边界,新模型下不再存在(app.js 里那处按索引变化判断阶段推进的防御逻辑因此成为冗余,但保留无害)。
 - **教训**:这个错误在 v1 SPEC 里以「公式」的形式存在了很久,单看公式自洽、测试也全绿——因为测试是照着公式写的。**契约文档写错时,测试只会把错误固化下来**;真正发现它的是用户在真实节奏里感到「被吞掉了」。
 
+### D26 全站计数:此刻多少人在做 + 总访问(2026-08-04)
+- **需求**:顶栏加「当前有多少人在做」和「总访问人数」,参考站(zhuzhiliao)样式是一行浅色小字。
+- **关键约束**:纯前端 + localStorage 统计不了「别人现在在做」——实时在线人数必须有服务器。项目零后端、零依赖、隐私优先,引不蒜子会把访客 IP / 页面 URL 发给第三方免费服务(无隐私政策、不稳定、数据可能清零),与项目基调冲突。
+- **选择**:自建 **Cloudflare Worker + Durable Object**(免费计划)当那台「服务器」——WebSocket 会话 + 心跳算「在做/在线」,DO storage 累计「总访问」。数据只经 Cloudflare,不碰任何第三方统计。这是「零后端」约束的**唯一例外**,严格限定在 `worker/`(部署源,不进 sw.js 预缓存);core/ 依旧纯函数,客户端逻辑全在 app.js。
+- **口径**:「在做」= `isRunning(session) && !session.paused`(暂停不算在做);每页加载记一次「总访问」(PV,与参考站「访问」同口径);本地预览(`file://`/localhost/私网)不 POST `/visit` 防污染,但仍连 WS 看实时数。
+- **降级**:worker 未部署(`COUNTER_ORIGIN` 留空)或离线时,那行安静显示 `–`,不阻塞任何现有功能;WS 断线指数退避重连,后台断开、回前台即刷。
+- **教训**:放顶栏中间会跟常驻的连续天数芯片抢位置、移动端宽度也不够;做成 header 第二行(整宽浅色小字)既不动现有元素、又能跟随吸顶随时看到——「此刻多少人在做」的陪伴感靠的是常驻可见。
+
+### D27 数据导入口径 + 部署形态改「落地页 + /app/」(2026-08-04)
+- **导入口径**:备份导入给两档——「合并」保留本机、只加指纹全新的记录(去重,重复导入同一文件不叠加);「替换」清空本机、完全按备份恢复(含设置)。核心逻辑放进 `core/storage.js` 的纯函数(`parseBackup` 净化校验 + `mergeRecords` 指纹去重),因为校验/合并是纯逻辑,必须可测;app.js 只做文件读取、对话框和落盘。
+- **导出文件名**:旧实现固定 `tigang-data.json` 无区分度。改为 `tigang-YYYYMMDD-HHmmss.json`(与 time-logger 的 `timelog-*` 同款);iOS 主屏 PWA 的 `a.download` 经常只发请求不落盘,故 iOS 走 `navigator.share({files})` 让用户选「存储到文件」。
+- **部署形态**:参考 time-logger 的 `time.eigentime.org/app/`——根路径放落地页(SEO + 分享入口),`/app/` 放应用。零构建地实现:新增 `site/`(落地页)+ `tools/build-site.mjs`(确定性复制:根=site/,/app/=sw.js 的 `PRECACHE_URLS` 单一真源),GitHub Pages 改传 `dist/`。`CNAME` 用「site/CNAME 存在即生效」的开关,默认不存在 → github.io 地址不中断。
+- **代价**:老地址 `wowayou.github.io/tigang-companion/` 从「应用」变成「落地页」,应用移到 `/app/`;未启动过的项目可接受。sw.js 从此自预缓存(`./sw.js` 进清单),否则组装后 `/app/sw.js` 缺失、离线注册失败——time-logger 的清单也是这么写的。
+- **英文名与域名**:产品面向中文用户,主品牌仍是「提肛陪伴」;英文名 **KegelMate**(落地页 tagline 用,可一行换)。域名定为 `kegel.eigentime.org`(用户拍板,与英文名呼应,而非 pinyin)。
+- **重定向由 GitHub 自动完成**:自定义域名配置后,旧地址 `wowayou.github.io/tigang-companion/` 由 GitHub Pages 301 → `kegel.eigentime.org/`,项目不写重定向。这与 time-logger 不同(它用独立镜像仓库保留旧只读版)——我们同一 repo 服两个地址,无法留只读旧版;跨域名 localStorage 不通用,迁移靠导出/导入备份。落地页对 standalone 模式(老安装)直接跳进 `/app/`。
+
 ### D8 已知限制 / Backlog
 - **提醒**:无后端 ⇒ 无 Web Push;通知仅在页面打开时由 setTimeout 触发。iOS 需 16.4+ 且安装到主屏才有通知能力。若要可靠提醒,后续加个极简 push 服务或打包原生。
 - ~~图标仅 SVG~~:已解决(2026-08-02,见 D15)——补齐 180/192/512/512-maskable 四个 PNG,解决 iOS 主屏图标退化问题。

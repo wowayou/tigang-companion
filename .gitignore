@@ -4,3 +4,6 @@ node_modules/
 
 # 参考截图等本地素材,不进仓库
 外部/
+
+# 部署组装产物(tools/build-site.mjs 生成,CI 会重建)
+dist/

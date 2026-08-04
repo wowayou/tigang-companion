@@ -1,0 +1,15 @@
+# 提肛陪伴 — 计数服务部署配置
+# 用法见 README.md。部署后把返回的 worker 地址填进 app.js 的 COUNTER_ORIGIN。
+name = "tigang-counter"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# 免费计划足够个人站:DO 请求量级、KV 存储配额都很宽裕;WebSocket 长连接免费。
+
+[[durable_objects.bindings]]
+name = "PRESENCE"
+class_name = "Presence"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["Presence"]

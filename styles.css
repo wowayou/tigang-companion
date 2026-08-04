@@ -72,6 +72,7 @@ body {
   top: 0;
   z-index: 5;
   display: flex;
+  flex-wrap: wrap; /* 第二行放全站统计,见 .site-stats */
   align-items: center;
   gap: 10px;
   padding: 12px 0 8px;
@@ -121,6 +122,23 @@ body {
 }
 
 .streak-chip-unit { font-size: 11.5px; opacity: .75; }
+
+/* 全站统计(顶栏第二行,参考站样式):此刻在做人数 + 总访问。
+   一行浅色小字,占整行宽度,数值用等宽数字避免跳动。 */
+.site-stats {
+  flex: 0 0 100%;
+  margin: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  letter-spacing: .02em;
+}
+
+.site-stats b {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
 
 .icon-btn {
   display: inline-flex;
@@ -559,6 +577,11 @@ body {
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 12px;
+}
+
+/* 数据管理卡:导出/导入一排,危险操作独占整行,避免误触 */
+.row-btns > .btn-danger {
+  grid-column: 1 / -1;
 }
 
 /* ---------------- 完成面板 ---------------- */

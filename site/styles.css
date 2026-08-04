@@ -1,0 +1,221 @@
+/* KegelMate · 提肛陪伴 — 落地页(根路径,零 JS,零依赖)
+   配色与应用的 styles.css 同源(teal 主色 + 米白底)。 */
+
+:root {
+  --teal: #0f9b8e;
+  --teal-dark: #0b7d73;
+  --teal-soft: #e4f2f0;
+  --bg: #f6f8f7;
+  --surface: #ffffff;
+  --text: #1c2b2a;
+  --muted: #6d8280;
+  --line: #e3ebe9;
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------- 顶部导航 ---------------- */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 14px 20px;
+  background: rgba(246, 248, 247, .92);
+  backdrop-filter: saturate(1.3) blur(8px);
+}
+
+.brand { font-size: 17px; font-weight: 700; letter-spacing: .03em; }
+.brand .en { font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: .04em; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 11px 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.btn:active { transform: translateY(1px); }
+
+.btn-primary {
+  border-color: var(--teal);
+  background: var(--teal);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(15, 155, 142, .28);
+}
+
+.btn-ghost { background: transparent; }
+
+/* ---------------- Hero ---------------- */
+
+.hero {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 56px 24px 40px;
+  text-align: center;
+}
+
+.hero-mark {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 22px;
+}
+.ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--teal);
+  border-radius: 50%;
+  opacity: .9;
+}
+.ring-1 { inset: 0; }
+.ring-2 { inset: 15px; opacity: .75; }
+.ring-3 { inset: 29px; opacity: .6; }
+
+.hero h1 {
+  margin: 0 0 14px;
+  font-size: 30px;
+  line-height: 1.3;
+  letter-spacing: .01em;
+}
+
+.hero-sub { margin: 0 auto 26px; max-width: 420px; color: var(--muted); }
+
+.cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+
+.hero-note { margin: 22px 0 0; font-size: 13px; color: var(--muted); }
+
+/* ---------------- 功能 ---------------- */
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 20px 16px;
+}
+
+.feat {
+  padding: 18px 18px 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(16, 50, 47, .04);
+}
+.feat h3 { margin: 0 0 6px; font-size: 16px; color: var(--teal-dark); }
+.feat p { margin: 0; font-size: 14px; color: var(--muted); }
+
+/* ---------------- 安装 ---------------- */
+
+.howto {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 30px 20px;
+  text-align: center;
+}
+.howto h2 { margin: 0 0 20px; font-size: 21px; }
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+  text-align: left;
+}
+.step {
+  display: flex;
+  gap: 12px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.step-num {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-size: 14px;
+  font-weight: 700;
+}
+.step p { margin: 0; font-size: 14px; color: var(--text); }
+.step strong { font-weight: 600; }
+
+/* ---------------- 隐私 / 免责 ---------------- */
+
+.privacy,
+.migrate,
+.disclaimer {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+.privacy h2,
+.migrate h2 { margin: 0 0 10px; font-size: 18px; }
+.privacy p,
+.migrate p,
+.disclaimer p { margin: 0; font-size: 14px; color: var(--muted); }
+.migrate code {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-size: 13px;
+}
+
+.disclaimer {
+  padding-top: 4px;
+  padding-bottom: 10px;
+  font-size: 13px;
+}
+
+/* ---------------- 页脚 ---------------- */
+
+.site-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 14px 20px 40px;
+  font-size: 13px;
+  color: #93a5a3;
+}
+.site-footer a { color: var(--teal-dark); text-decoration: none; }

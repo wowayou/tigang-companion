@@ -10,6 +10,8 @@ compatibility_date = "2024-11-01"
 name = "PRESENCE"
 class_name = "Presence"
 
+# 免费计划要求 Durable Object 必须走 SQLite 后端(new_sqlite_classes),
+# 否则报错 code 10097;worker.js 里的 ctx.storage KV 式 API 在 SQLite DO 上同样可用。
 [[migrations]]
 tag = "v1"
-new_classes = ["Presence"]
+new_sqlite_classes = ["Presence"]

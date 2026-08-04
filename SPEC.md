@@ -369,7 +369,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 56 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 65 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。

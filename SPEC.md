@@ -435,9 +435,9 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 | 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` `opt-sync-enabled` `opt-sync-master` `btn-sync-now` `sync-last` `sync-state` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
 
-### §8.z 全站计数(顶栏第二行:此刻在做人数 + 总访问)
+### §8.z 全站计数(空闲态紧凑徽标:此刻在做人数 + 总访问)
 
-顶栏第二行 `.site-stats`(参考站样式,一行浅色小字):`此刻 <b id="st-doing">–</b> 人在做 · 总访问 <b id="st-visits">–</b>`。初始/离线显示 `–`,不阻塞任何现有功能。
+`#site-stats` 是**紧凑徽标**(R5 方案 a):`● <b id="st-doing">–</b> 人在练 · 总访问 <b id="st-visits">–</b>`。**只在空闲态显示(陪伴感),训练中隐藏(零打扰)**——显隐由 `renderTrain()` 里的 `el.siteStats.hidden = isRunning(session)` 驱动,每 100ms 渲染帧同步;完成/重置后重渲染回空闲态,徽标自动回来。初始/离线显示 `–`,不阻塞任何现有功能。
 
 数据源是**自建 Cloudflare Worker + Durable Object**(`worker/`,部署见 `worker/README.md`),不引任何第三方统计服务(不用不蒜子等:那些会把访客 IP / 页面 URL 发给第三方,违反本项目的隐私基调)。
 

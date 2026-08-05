@@ -212,6 +212,16 @@
 - **发版注意(SYNC-SPEC 单元 3 的一处修正)**:app.js import 了新的静态文件 `sync/client.mjs`,它**必须**进 sw.js 预缓存清单并升 `CACHE_NAME`(v13)。SYNC-SPEC 原写「PRECACHE 不变(无新静态文件)」,但那条假设不成立——不预缓存则更新后首次离线打开会因 ES module 加载失败整站挂掉。按 CLAUDE.md「新增静态文件必须进预缓存」硬规则处理。
 - **仓库演进计划**:后端暂放本仓库 `sync-server/` 子目录(前后端契约同 PR、一眼对齐、首版落地最快)。`client.mjs` 强制不依赖 app.js + `origin` 参数化,为将来拆独立仓库留口子。**拆仓触发条件**:time-logger 要同步时,把 `sync-server/` 整体迁出成独立仓库(拟名 `eigentime-sync`),tigang-companion 与 time-logger 通过 git submodule 或 npm link 引用;客户端代码零改动,只是后端服务换仓库地址。遵循 ROADMAP「先验证再投入」原则——单仓库够用时不提前拆。
 
+### D32 计数徽标化:空闲态紧凑徽标 + 训练中隐藏(R5,2026-08-05)
+- **反馈**:顶栏第二行整宽常驻「此刻 X 人在做 · 总访问 Y」太侵入,移动端窄屏占位、跟连续天数芯片抢注意力(R5)。D26 当初放 header 的理由是「陪伴感靠常驻可见」。
+- **调研**(HANDOVER §3)列了 5 个候选,按「侵入性 vs 可见性」权衡。用户拍板方案 a:**空闲态显示 + 紧凑徽标**,并保留两数(「● X 人在练 · 总访问 Y」)。
+- **实现**:
+  - `index.html`:`.site-stats` 文案改 `● X 人在练 · 总访问 Y`,加初始 `hidden`。
+  - `styles.css`:整宽第二行(`flex:0 0 100%`)→ 紧凑 pill(`flex:0 0 auto` + `padding:3px 10px` + `border-radius:999px` + `nowrap`),仍居中于 header。
+  - `app.js`:`renderTrain()` 里 `el.siteStats.hidden = isRunning(session)`——每 100ms 渲染帧同步,训练中隐藏、空闲/完成态显示;完成/重置重渲染回空闲态徽标自动回来。
+- **口径**:总访问**保持 PV 不改**(刷新+1 是 D26 定的 PV 口径,用户明确确认不改)。计数协议不动(worker 不碰,仍由 counter 模块 + renderCounter 更新),只改 DOM/样式与显隐时机。
+- **为什么用 renderTrain 驱动而非显式事件**:显隐要覆盖 开始/暂停/继续/完成/重置/后台切回 所有路径,而 renderTrain 每 100ms 无条件跑,`hidden = running` 是纯状态投影,天然覆盖所有路径,零遗漏。代价是每帧多一次赋值,无感。
+
 ### D8 已知限制 / Backlog
 - **提醒**:无后端 ⇒ 无 Web Push;通知仅在页面打开时由 setTimeout 触发。iOS 需 16.4+ 且安装到主屏才有通知能力。若要可靠提醒,后续加个极简 push 服务或打包原生。
 - ~~图标仅 SVG~~:已解决(2026-08-02,见 D15)——补齐 180/192/512/512-maskable 四个 PNG,解决 iOS 主屏图标退化问题。

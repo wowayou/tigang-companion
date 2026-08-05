@@ -34,6 +34,7 @@ const el = {
   streakChipNum: $('streak-chip-num'),
   stDoing: $('st-doing'),
   stVisits: $('st-visits'),
+  siteStats: $('site-stats'),
 
   tabTrain: $('tab-train'),
   tabStats: $('tab-stats'),
@@ -552,6 +553,10 @@ function renderTrain() {
   }
 
   const running = isRunning(s);
+
+  // R5 方案 a:全站统计徽标只在空闲态显示(陪伴感),训练中隐藏(零打扰)。
+  // 训练结束后 resetSession/finishSession 会重渲染回空闲态,徽标自动回来。
+  if (el.siteStats) el.siteStats.hidden = running;
 
   // 计数口径:收紧(+维持)结束即记完成,但索引要到放松结束才推进 ——
   // 所以放松期间 repIndex 指向的正是刚做完的那一次,报已完成数就用 repIndex+1。

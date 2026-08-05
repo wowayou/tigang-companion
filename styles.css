@@ -123,16 +123,20 @@ body {
 
 .streak-chip-unit { font-size: 11.5px; opacity: .75; }
 
-/* 全站统计(顶栏第二行,参考站样式):此刻在做人数 + 总访问。
-   一行浅色小字,占整行宽度,数值用等宽数字避免跳动。 */
+/* 全站统计(R5 方案 a):空闲态显示为紧凑徽标 ● X 人在练 · 总访问 Y;
+   训练中隐藏。参考站样式从整行小字收敛成 pill,数值用等宽数字避免跳动。 */
 .site-stats {
-  flex: 0 0 100%;
+  flex: 0 0 auto;
   margin: 0;
-  text-align: center;
+  align-self: center;
+  padding: 3px 10px;
+  border: 1px solid var(--line, rgba(0, 0, 0, .08));
+  border-radius: 999px;
   font-size: 12px;
   line-height: 1.4;
   color: var(--muted);
   letter-spacing: .02em;
+  white-space: nowrap;
 }
 
 .site-stats b {

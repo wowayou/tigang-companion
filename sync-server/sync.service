@@ -1,0 +1,28 @@
+# sync.service — 提肛陪伴同步后端(systemd unit 示例)
+#
+# 部署(甲骨文实例,用户执行):
+#   1. 把整个 sync-server/ 目录放到 /opt/sync-server(或改下面路径)。
+#   2. sudo cp sync.service /etc/systemd/system/sync.service
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now sync
+#   5. 看日志:journalctl -u sync -f
+#
+# Node 版本:24 实测无需 flag;若用 Node 22,ExecStart 需加 --experimental-sqlite。
+
+[Unit]
+Description=KegelMate sync server (E2E-encrypted blob store, zero-dependency)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu            # 改成运行服务的用户(或 www-data)
+Group=ubuntu
+WorkingDirectory=/opt/sync-server
+# Node 22 用:ExecStart=/usr/bin/node --experimental-sqlite server.mjs
+ExecStart=/usr/bin/node /opt/sync-server/server.mjs
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

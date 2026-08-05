@@ -1,0 +1,41 @@
+# nginx.conf.example — sync.eigentime.org(自建同步后端,端到端加密)
+#
+# 用法(甲骨文凤凰城实例,复用现有 nginx,按 server_name 虚拟主机分流):
+#   1. 把下面 server 块加进现有 nginx 配置(不要动其它 server 块)。
+#   2. certbot --nginx -d sync.eigentime.org  单独签证书(自动续期,不碰现有域名证书)。
+#   3. 把「http 块内」那一行 limit_req_zone 加进 http { } 顶层。
+#   4. nginx -t && systemctl reload nginx
+#
+# CORS 全在 nginx 加,后端逻辑更干净(server.mjs 里也带同名头,nginx 层优先)。
+# X-Forwarded-For 用 $remote_addr 覆写:后端只监听回环,trusted proxy 只有本机 nginx,
+# 所以这个头是可信的,后端用它做 per-IP 限流。
+
+server {
+  listen 443 ssl http2;
+  server_name sync.eigentime.org;
+
+  ssl_certificate     /etc/letsencrypt/live/sync.eigentime.org/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/sync.eigentime.org/privkey.pem;
+
+  # CORS(应用无 cookie/凭据,用 * 最简)
+  add_header Access-Control-Allow-Origin  "*" always;
+  add_header Access-Control-Allow-Methods "GET,PUT,OPTIONS" always;
+  add_header Access-Control-Allow-Headers "Content-Type" always;
+  add_header Access-Control-Max-Age       "86400" always;
+
+  # preflight 短路(浏览器 PUT 前必发一次;响应头 CORS 已带,204 即过)
+  if ($request_method = OPTIONS) { return 204; }
+
+  location / {
+    limit_req zone=sync burst=20 nodelay;   # nginx 层兜底限流(见 http 块)
+
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    # 覆写 X-Forwarded-For:后端据此拿到真实客户端 IP 做 per-IP 限流
+    proxy_set_header X-Forwarded-For $remote_addr;
+  }
+}
+
+# ——— http 块顶层(与上面 server 块同级,通常是 /etc/nginx/nginx.conf)———
+#
+# limit_req_zone $binary_remote_addr zone=sync:10m rate=20r/m;

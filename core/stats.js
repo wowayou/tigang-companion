@@ -34,15 +34,19 @@ export function addDays(dateStr, delta) {
   return `${pad4(dt.getUTCFullYear())}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
 }
 
-/** 生成一条打卡记录:数值取整、finished 转 boolean。 */
-export function makeRecord({ dateStr, completedReps, totalReps, durationSec, finished } = {}) {
-  return {
+/** 生成一条打卡记录:数值取整、finished 转 boolean。
+ * 可选 ts(同步用,毫秒时间戳)透传:数值有效则写入,缺失/非法则不写该键(旧记录保持无 ts)。 */
+export function makeRecord({ dateStr, completedReps, totalReps, durationSec, finished, ts } = {}) {
+  const rec = {
     dateStr: String(dateStr ?? ''),
     completedReps: toInt(completedReps),
     totalReps: toInt(totalReps),
     durationSec: toInt(durationSec),
     finished: Boolean(finished),
   };
+  const t = Math.trunc(Number(ts));
+  if (Number.isFinite(t)) rec.ts = t;
+  return rec;
 }
 
 function finishedDateSet(records) {

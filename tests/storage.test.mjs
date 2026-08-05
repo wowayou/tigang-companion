@@ -215,10 +215,12 @@ test('exportJSON:带 app/version 头的缩进 JSON', () => {
 
 test('parseBackup:导出文件往返 + 设置补新默认键', () => {
   const data = defaults();
-  data.records = [{ dateStr: '2026-08-04', completedReps: 12, totalReps: 12, durationSec: 150, finished: true }];
+  data.records = [
+    { dateStr: '2026-08-04', completedReps: 12, totalReps: 12, durationSec: 150, finished: true, ts: 1722768000000 },
+  ];
   const result = parseBackup(exportJSON(data));
   assert.equal(result.ok, true);
-  assert.deepEqual(result.data.records, data.records);
+  assert.deepEqual(result.data.records, data.records); // 可选 ts 保留,往返一致
   // 旧备份缺新默认键(如 reminder)→ 补上,且不覆盖已有值
   const legacy = JSON.stringify({
     app: 'tigang-companion', version: 1,
@@ -244,16 +246,16 @@ test('parseBackup:损坏/非本应用文件 → 明确报错,不给半成品', (
 test('parseBackup:逐条净化非法记录', () => {
   const result = parseBackup(JSON.stringify({
     records: [
-      { dateStr: '2026-08-04', completedReps: '12', totalReps: 12, durationSec: 150, finished: true }, // 字符串数值可接受
+      { dateStr: '2026-08-04', completedReps: '12', totalReps: 12, durationSec: 150, finished: true, ts: 1722768000000 }, // 字符串数值可接受,ts 有效保留
       { dateStr: '08/04', completedReps: 1, totalReps: 1, durationSec: 1, finished: true },             // 日期格式非法 → 丢弃
-      { dateStr: '2026-08-05', completedReps: -3, totalReps: 5, durationSec: 'abc', finished: 1 },      // 负值归零、坏字段归零、finished 严格布尔
+      { dateStr: '2026-08-05', completedReps: -3, totalReps: 5, durationSec: 'abc', finished: 1, ts: 'oops' }, // 负值归零、坏字段归零、ts 非法 → 不写该键
       'garbage',
     ],
     settings: { presetKey: 'quick' },
   }));
   assert.equal(result.ok, true);
   assert.deepEqual(result.data.records, [
-    { dateStr: '2026-08-04', completedReps: 12, totalReps: 12, durationSec: 150, finished: true },
+    { dateStr: '2026-08-04', completedReps: 12, totalReps: 12, durationSec: 150, finished: true, ts: 1722768000000 },
     { dateStr: '2026-08-05', completedReps: 0, totalReps: 5, durationSec: 0, finished: false },
   ]);
   assert.equal(result.data.settings.presetKey, 'quick');

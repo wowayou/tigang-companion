@@ -79,18 +79,24 @@ export function exportJSON(data) {
 
 /* ---------------- 导入备份 ---------------- */
 
-/** 备份里的记录逐条净化:dateStr 必须是 YYYY-MM-DD,数值取非负整数,非法字段归零。 */
+/** 备份里的记录逐条净化:dateStr 必须是 YYYY-MM-DD,数值取非负整数,非法字段归零。
+ * 可选 ts(同步用,毫秒时间戳):Math.trunc(Number),非法/缺失 → 不写该键(旧记录保持无 ts,向后兼容)。 */
 function sanitizeRecords(raw) {
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((r) => isPlainObject(r) && typeof r.dateStr === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.dateStr))
-    .map((r) => ({
-      dateStr: r.dateStr,
-      completedReps: nonNegInt(r.completedReps),
-      totalReps: nonNegInt(r.totalReps),
-      durationSec: nonNegInt(r.durationSec),
-      finished: r.finished === true,
-    }));
+    .map((r) => {
+      const rec = {
+        dateStr: r.dateStr,
+        completedReps: nonNegInt(r.completedReps),
+        totalReps: nonNegInt(r.totalReps),
+        durationSec: nonNegInt(r.durationSec),
+        finished: r.finished === true,
+      };
+      const t = Math.trunc(Number(r.ts));
+      if (Number.isFinite(t)) rec.ts = t;
+      return rec;
+    });
 }
 
 function nonNegInt(value) {

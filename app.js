@@ -699,6 +699,7 @@ function writeRecord(state, finished) {
     totalReps: state.config.sets * state.config.repsPerSet,
     durationSec: Math.round((Date.now() - state.startedAt) / 1000),
     finished,
+    ts: Date.now(), // 同步 LWW 用的写入时刻(只在胶水层注入,core 不调 Date.now)
   });
   data.records.push(record);
   persist();

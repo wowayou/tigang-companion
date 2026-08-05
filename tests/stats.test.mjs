@@ -62,6 +62,10 @@ test('makeRecord:5 个字段、数值取整、finished 转 boolean', () => {
   assert.deepEqual(bad, { dateStr: '2026-08-01', completedReps: 0, totalReps: 0, durationSec: 0, finished: false });
   assert.equal(makeRecord({ dateStr: '2026-08-01', finished: '' }).finished, false);
   assert.equal(makeRecord({ dateStr: '2026-08-01', finished: true }).finished, true);
+  // 可选 ts 透传(同步 LWW 用):有效则保留,缺失/非法则不写该键(旧记录向后兼容)
+  assert.equal(makeRecord({ dateStr: '2026-08-01', completedReps: 3, totalReps: 12, durationSec: 30, finished: true, ts: 1722768000123 }).ts, 1722768000123);
+  assert.ok(!('ts' in makeRecord({ dateStr: '2026-08-01', completedReps: 3, totalReps: 12, durationSec: 30, finished: true })));
+  assert.ok(!('ts' in makeRecord({ dateStr: '2026-08-01', completedReps: 3, totalReps: 12, durationSec: 30, finished: true, ts: 'oops' })));
   // JSON 可序列化
   assert.deepEqual(JSON.parse(JSON.stringify(r)), r);
 });

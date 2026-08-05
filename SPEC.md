@@ -24,11 +24,18 @@ tigang-companion/
 │   ├── engine.js         # 训练状态机(纯函数,零 DOM)
 │   ├── stats.js          # 打卡/连续天数/热力图数据(纯函数)
 │   ├── storage.js        # localStorage 读写
-│   └── achievements.js   # 成就徽章 / 今日目标(纯函数)
+│   ├── achievements.js   # 成就徽章 / 今日目标(纯函数)
+│   └── sync.js           # 多端同步纯函数:端到端加密 + LWW 合并(可迁移到 time-logger)
 ├── ROADMAP.md            # 增长机制路线图(产品向,不落代码;N 系列为准)
 ├── site/                 # 落地页(部署到站点根路径;不是 PWA 的一部分,不进 sw.js 预缓存)
 │   ├── index.html
 │   └── styles.css
+├── sync/
+│   └── client.mjs        # 同步浏览器客户端(零依赖,origin 参数化,可复用/可迁移)
+├── sync-server/          # 自建同步后端(端到端加密,只存密文;部署/端点/限流见 sync-server/README.md)
+│   ├── server.mjs        # Node 单文件:node:http + node:sqlite,零 npm
+│   ├── nginx.conf.example
+│   └── sync.service      # systemd unit 示例
 ├── tools/
 │   ├── make-icons.mjs    # 零依赖 PNG 图标生成脚本(一次性运行,产物提交进仓库)
 │   └── build-site.mjs    # 组装部署目录:根=site/,/app/=sw.js 预缓存清单(单一真源);CI 调用
@@ -40,7 +47,8 @@ tigang-companion/
     ├── engine.test.mjs
     ├── stats.test.mjs
     ├── storage.test.mjs
-    └── achievements.test.mjs
+    ├── achievements.test.mjs
+    └── sync.test.mjs
 ```
 
 新增文件须同步本清单 + sw.js 预缓存清单 + 升级 `CACHE_NAME`,否则用户拿不到更新。
@@ -142,8 +150,9 @@ export function overallProgress(state, nowMs) {}        // 0..1;= 1 - remainingT
 ```js
 export function localDateStr(date) {}        // Date 对象 → 'YYYY-MM-DD',用 getFullYear/getMonth/getDate 本地分量,补零
 export function addDays(dateStr, delta) {}   // 用 Date.UTC 做日期算术,返回 'YYYY-MM-DD'
-export function makeRecord({ dateStr, completedReps, totalReps, durationSec, finished }) {}
+export function makeRecord({ dateStr, completedReps, totalReps, durationSec, finished, ts }) {}
                                              // 返回含这 5 个字段的新对象;数值取整、finished 转 boolean
+                                             // 可选 ts(同步 LWW 用,毫秒时间戳):数值有效则写入,缺失/非法则不写该键(旧记录向后兼容)
 
 // 连续打卡天数:只有 finished===true 的记录算"完成当天打卡"。
 // 锚点:今天有完成记录则从今天起算,否则从昨天起算;锚点无记录 → 0;向前逐日累计。
@@ -175,6 +184,7 @@ export const DEFAULT_SETTINGS = {
   softCue: true,                    // 阶段内轻提示:准备倒数每秒轻响 + 休息期呼吸引导;受 sound 总开关约束
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
+  sync: { enabled: false },         // 多端同步开关(可选 · 端到端加密);只存开关——主密码/userId 都不进 settings
 };
 
 // storage 参数默认 globalThis.localStorage,测试传 fake {getItem,setItem,removeItem}。
@@ -245,6 +255,32 @@ export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
 
 **设计理由(bestStreak 而非当前 streak)**:连续类徽章看 `stats.longestStreak`(历史最长)而不是 `computeStreak`(当前连续)。原因是断档后已经拿到的徽章不该被收回——用当前 streak 判定会导致用户某天没打卡,昨天还挂着的「一周不断」徽章瞬间消失,这是负向体验;历史最长值只增不减,徽章墙因而具备正确的「成就」语义(拿到就是拿到了)。
 
+### §6.z 多端同步(可选 · 端到端加密,自建后端)
+
+实现约束:**端到端加密不可妥协**——后端只存密文,主密码绝不离开设备,后端不解密不解析 blob。
+
+- **后端地址**(app.js 顶部,与 `COUNTER_ORIGIN` 并列,**与计数 Worker 解耦**,不同址不同服务):
+  ```js
+  const SYNC_ORIGIN = 'https://sync.eigentime.org'; // 自建甲骨文后端;换后端(未来回 Worker / 本地开发)改这一行
+  ```
+- **后端契约**:见 `sync-server/README.md`(不进 SPEC 主体——SPEC 是前端契约)。端点 `PUT/GET /sync?key=<userId>`、`GET /health`;只存取密文字符串,last-write-wins 覆盖;限流 1 次/10s per userId + 20 次/分 per IP。
+- **纯函数层**(`core/sync.js`,可迁移到 time-logger):
+  - `encryptBlob(plaintextObj, passphrase, crypto=globalThis.crypto)` → `{v:1,salt,iv,ct,iter}`(PBKDF2-SHA256 200000 轮 + AES-GCM-256)。
+  - `decryptBlob(blob, passphrase, crypto)` → `{ok:true,data} | {ok:false,error}`;错误主密码 / 损坏密文 → `{ok:false}` **不抛**(调用方静默降级纯本地)。
+  - `mergeForSync(local, remote)` → `{merged, conflicts}`:同指纹(`dateStr|completedReps|totalReps|durationSec|finished`)去重不计冲突;同 dateStr 不同指纹 LWW(有 ts 取大,平 ts / 都无 ts 留 remote),conflicts 按被淘汰记录数计;其余全保留;输出按 dateStr 升序,**顺序无关**。
+  - `newUserId(crypto)` → UUID v4。
+  - crypto 一律参数注入(默认 `globalThis.crypto`);core 不碰 DOM / `Date.now()` / `localStorage`。
+- **记录 schema**:record 可带可选 `ts`(毫秒时间戳,`app.js writeRecord` 注入 `Date.now()`);旧记录无 ts 视为 0,向后兼容。
+- **浏览器客户端**(`sync/client.mjs`):`syncPull/syncPush/syncProbe`,origin 参数化,AbortController 10s 超时,任何失败 `{ok:false,error}` 不抛;CORS 失败与断网统一 `'network'`。
+- **userId 独立 key**(`tigang_sync_user`,明文 localStorage):不进 settings、不进 exportJSON。泄露只意味着别人可覆盖密文,无主密码解不开,本地可重推恢复。
+- **主密码内存态**:不存 localStorage;每次开应用在设置里重输(忘了主密码=远端密文不可恢复,**本地数据不丢**,重输=重新开始同步)。会话内保留于内存(弹窗关闭不清),页面关闭即丢。
+- **同步时机**(无新定时器):
+  - 打开应用:若 `sync.enabled && 主密码已输入(本会话)` → 后台 pull → decrypt → merge(只合记录,设置保留本机)→ save → renderStats;任一步失败静默降级纯本地。
+  - `persist()` 后:debounce 2s,若启用且有主密码且在线 → encrypt → push;失败静默,下次打开重试。
+  - 离线(`!navigator.onLine`)跳过。
+- **UI**(设置弹窗一组,新增 DOM id 见 §8.x):`#opt-sync-enabled` `#opt-sync-master` `#btn-sync-now` `#sync-last` `#sync-state`。
+- **正确性说明**:**不同主密码 → 解密失败 → 静默降级本地、UI 显示「解密失败」** 是端到端加密的正确表现,不是 bug;离线打开纯本地不报错。
+
 ## §7 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
 
 engine.test.mjs 至少覆盖:
@@ -271,6 +307,8 @@ stats.test.mjs 至少覆盖:补零格式、addDays 跨月/跨年、streak 的 6 
 storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、save/load 往返、旧 settings 缺键时合并出新默认键(含 v1 存档升级后拿到 holdSec/voice/softCue 新默认键且不改变已有取值)、save 异常返回 false。
 
 achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 的 badges/next/nextByMetric、unlockedIds、newlyUnlocked(前后快照对比)、dailyGoal 达标/未达标、bestStreak 断档后徽章不被收回。
+
+sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → {ok:false} 不抛、损坏 blob(ct 改一字节)→ {ok:false} 不抛、非法/垃圾 blob → {ok:false}、旧记录无 ts + 新记录有 ts 混合不丢、同 dateStr 不同指纹 → LWW + conflicts 正确、同 dateStr 都无 ts / 平 ts → 留 remote、同指纹 → 不叠加 conflicts=0、合并稳定(打乱顺序 merged 一致)、null/非法入参不抛、newUserId 合法 UUID v4 格式。
 
 ## §8 UI 规格(index.html + styles.css + app.js)
 
@@ -378,7 +416,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 71 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 76 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -393,7 +431,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` |
 | 分享弹窗 | `dlg-share` `share-img` `btn-save-share` `btn-share-close` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
-| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` `opt-sync-enabled` `opt-sync-master` `btn-sync-now` `sync-last` `sync-state` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
 
 ### §8.z 全站计数(顶栏第二行:此刻在做人数 + 总访问)

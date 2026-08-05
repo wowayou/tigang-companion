@@ -12,7 +12,7 @@ export const SYNC_TIMEOUT_MS = 10000;
 
 /**
  * GET <origin>/sync?key=<userId> → 拉密文。
- * 成功: { ok:true, blob:string }
+ * 成功: { ok:true, blob }——blob 为 encryptBlob 返回的对象(线路上是密文 JSON 串,这里解析回对象)
  * 远端无数据(首次): { ok:false, error:'none', blob:null }
  * 网络/超时: { ok:false, error:'network' }
  */
@@ -23,7 +23,17 @@ export async function syncPull(origin, userId) {
     if (network) return { ok: false, error: 'network' };
     if (!res.ok) return { ok: false, error: 'network' };
     const data = await res.json();
-    if (data && data.ok === true) return { ok: true, blob: data.blob };
+    if (data && data.ok === true) {
+      let blob = data.blob;
+      if (typeof blob === 'string') {
+        try {
+          blob = JSON.parse(blob);
+        } catch {
+          /* 保留原串:非合法密文对象,decryptBlob 会安全拒绝 */
+        }
+      }
+      return { ok: true, blob };
+    }
     if (data && data.ok === false && data.error === 'none') return { ok: false, error: 'none', blob: null };
     return { ok: false, error: 'unknown' };
   } catch {
@@ -33,15 +43,17 @@ export async function syncPull(origin, userId) {
 
 /**
  * PUT <origin>/sync?key=<userId> body {blob} → 推密文(覆盖,last-write-wins)。
+ * blob 可以是 encryptBlob 的对象或已序列化字符串,上线前统一序列化为密文 JSON 串(server 契约是字符串)。
  * 成功: { ok:true };限流: { ok:false, error:'rate' };超限: { ok:false, error:'too-big' };网络: { ok:false, error:'network' }
  */
 export async function syncPush(origin, userId, blob) {
   try {
     const url = `${origin}/sync?key=${encodeURIComponent(userId)}`;
+    const payload = typeof blob === 'string' ? blob : JSON.stringify(blob);
     const { res, network } = await request(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ blob }),
+      body: JSON.stringify({ blob: payload }),
     });
     if (network) return { ok: false, error: 'network' };
     if (res.status === 413) return { ok: false, error: 'too-big' };

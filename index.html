@@ -319,6 +319,27 @@
       <input type="time" id="opt-reminder-time" class="time-input" value="21:00">
     </label>
 
+    <div class="opt-block">
+      <p class="opt-block-title">同步(可选 · 端到端加密)</p>
+
+      <label class="opt-row">
+        <span class="opt-text">启用同步</span>
+        <input type="checkbox" id="opt-sync-enabled" class="switch">
+      </label>
+
+      <label class="opt-col">
+        <span class="opt-text">主密码(加密钥匙,不离开本机)</span>
+        <input type="password" id="opt-sync-master" class="text-input" placeholder="输入主密码" autocomplete="off">
+      </label>
+
+      <div class="opt-actions">
+        <button type="button" class="btn btn-primary" id="btn-sync-now">立即同步</button>
+      </div>
+
+      <p class="hint">上次同步:<span id="sync-last">—</span> · 状态:<span id="sync-state">—</span></p>
+      <p class="hint">数据以主密码加密后存自建服务器,项目方读不到明文;主密码不离开本机。忘记主密码则远端数据无法恢复,本地数据不受影响。</p>
+    </div>
+
     <p class="hint">不开语音也能不看屏幕:收紧是上行音、维持是双平音、放松是下行音。语音开启后会通过扬声器外放,公共场合留意。</p>
     <p class="hint">网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳</p>
 

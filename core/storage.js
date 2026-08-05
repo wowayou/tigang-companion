@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   softCue: true,         // 阶段内轻提示:准备倒数每秒轻响 + 休息期呼吸引导;受 sound 总开关约束
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
+  sync: { enabled: false }, // 多端同步(可选 · 端到端加密);只存开关,主密码/userId 都不进 settings
 };
 
 function deepCopy(value) {
@@ -26,13 +27,14 @@ function isPlainObject(value) {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** 与 DEFAULT_SETTINGS 浅合并 + reminder/custom 二级合并(旧数据升级后不丢新默认键)。 */
+/** 与 DEFAULT_SETTINGS 浅合并 + custom/reminder/sync 二级合并(旧数据升级后不丢新默认键)。 */
 function mergeSettings(raw) {
   const base = deepCopy(DEFAULT_SETTINGS);
   if (!isPlainObject(raw)) return base;
   const merged = { ...base, ...raw };
   merged.custom = { ...base.custom, ...(isPlainObject(raw.custom) ? raw.custom : {}) };
   merged.reminder = { ...base.reminder, ...(isPlainObject(raw.reminder) ? raw.reminder : {}) };
+  merged.sync = { ...base.sync, ...(isPlainObject(raw.sync) ? raw.sync : {}) };
   return merged;
 }
 

@@ -1002,7 +1002,8 @@ body {
 
 .switch:disabled { opacity: .45; cursor: not-allowed; }
 
-.time-input {
+.time-input,
+.text-input {
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -1011,6 +1012,40 @@ body {
   font-family: inherit;
   font-size: 15px;
 }
+
+/* 设置弹窗里的分组块(如「同步」):顶部一条分隔线,标题小字 */
+.opt-block {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.opt-block-title {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+/* 上下堆叠的选项行:文字在上,输入框在下占满整行 */
+.opt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.opt-col .text-input {
+  width: 100%;
+}
+
+.opt-actions {
+  padding: 11px 0;
+}
+
+.opt-actions .btn { flex: 1; }
 
 .dlg-actions {
   display: flex;

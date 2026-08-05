@@ -43,6 +43,7 @@ test('STORAGE_KEY 与 DEFAULT_SETTINGS 契约', () => {
     softCue: true,
     vibration: true,
     reminder: { enabled: false, time: '21:00' },
+    sync: { enabled: false }, // 多端同步开关(可选 · 端到端加密);主密码/userId 不进 settings
   });
 });
 
@@ -61,6 +62,7 @@ test('v1 存档(无 holdSec/voice)升级后拿到新默认键,且不改变已有
   assert.equal(loaded.settings.holdSec, 0, '老用户默认不启用维持阶段');
   assert.equal(loaded.settings.voice, false, '语音默认关,升级不该突然开始外放');
   assert.equal(loaded.settings.softCue, true, '轻提示默认开,老用户升级后直接拿到倒数/呼吸引导');
+  assert.deepEqual(loaded.settings.sync, { enabled: false }, '同步默认关,老用户升级不会突然开始上传');
   // 原有设置一个都不能被覆盖
   assert.equal(loaded.settings.presetKey, 'advanced');
   assert.equal(loaded.settings.sound, false);
@@ -129,6 +131,7 @@ test('save/load 往返', () => {
       softCue: false,
       vibration: false,
       reminder: { enabled: true, time: '07:30' },
+      sync: { enabled: true },
     },
   };
   assert.equal(save(data, storage), true);
@@ -154,6 +157,7 @@ test('旧版本 settings 缺键 → 合并出新默认键(浅合并 + reminder/c
     vibration: true,
     custom: DEFAULT_SETTINGS.custom,
     reminder: DEFAULT_SETTINGS.reminder,
+    sync: DEFAULT_SETTINGS.sync,
   });
   assert.equal(loaded.records.length, 1);
 

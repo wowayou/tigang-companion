@@ -40,6 +40,7 @@ test('STORAGE_KEY 与 DEFAULT_SETTINGS 契约', () => {
     holdSec: 0,
     sound: true,
     voice: false,
+    softCue: true,
     vibration: true,
     reminder: { enabled: false, time: '21:00' },
   });
@@ -59,6 +60,7 @@ test('v1 存档(无 holdSec/voice)升级后拿到新默认键,且不改变已有
   const loaded = load(fakeStorage(v1Raw));
   assert.equal(loaded.settings.holdSec, 0, '老用户默认不启用维持阶段');
   assert.equal(loaded.settings.voice, false, '语音默认关,升级不该突然开始外放');
+  assert.equal(loaded.settings.softCue, true, '轻提示默认开,老用户升级后直接拿到倒数/呼吸引导');
   // 原有设置一个都不能被覆盖
   assert.equal(loaded.settings.presetKey, 'advanced');
   assert.equal(loaded.settings.sound, false);
@@ -124,6 +126,7 @@ test('save/load 往返', () => {
       holdSec: 4,
       sound: false,
       voice: false,
+      softCue: false,
       vibration: false,
       reminder: { enabled: true, time: '07:30' },
     },
@@ -146,6 +149,7 @@ test('旧版本 settings 缺键 → 合并出新默认键(浅合并 + reminder/c
     presetKey: 'beginner',
     sound: false,
     voice: false,
+    softCue: true,
     holdSec: 0,
     vibration: true,
     custom: DEFAULT_SETTINGS.custom,

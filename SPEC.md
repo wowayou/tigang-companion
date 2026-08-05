@@ -172,6 +172,7 @@ export const DEFAULT_SETTINGS = {
   holdSec: 0,                       // 「维持」阶段秒数,0=关闭;全局值,叠加在任何方案(含 custom)之上
   sound: true,
   voice: false,                     // 语音播报阶段名;默认关(会外放,使用场景多在公共/半公共环境)
+  softCue: true,                    // 阶段内轻提示:准备倒数每秒轻响 + 休息期呼吸引导;受 sound 总开关约束
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
 };
@@ -267,7 +268,7 @@ engine.test.mjs 另需覆盖(v2,维持阶段):
 
 stats.test.mjs 至少覆盖:补零格式、addDays 跨月/跨年、streak 的 6 种情形(空、仅今天、今昨连续、仅昨天、断档、finished=false 不计)、totals 聚合、lastNDays 长度/排序/空日补零、longestStreak(空/单天/连续/断档取最长/同日多条不重复计数/跨月跨年/顺序无关/与 computeStreak 的区别)。
 
-storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、save/load 往返、旧 settings 缺键时合并出新默认键(含 v1 存档升级后拿到 holdSec/voice 新默认键且不改变已有取值)、save 异常返回 false。
+storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、save/load 往返、旧 settings 缺键时合并出新默认键(含 v1 存档升级后拿到 holdSec/voice/softCue 新默认键且不改变已有取值)、save 异常返回 false。
 
 achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 的 badges/next/nextByMetric、unlockedIds、newlyUnlocked(前后快照对比)、dailyGoal 达标/未达标、bestStreak 断档后徽章不被收回。
 
@@ -309,12 +310,19 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
   - `done` 三连音 523/659/880Hz。
   `settings.sound` 为 false 则跳过。
 
+**阶段内轻提示**(`settings.softCue`,默认**开**;`sound` 是总开关,关掉提示音则一并静音):上面的 TONES 只在**阶段边界**响一次,所以 v2 之前「准备」只有进入时那一声、「休息」全程静默。轻提示补的是阶段**内部**的声音通道,峰值 gain 刻意压到 `0.012`(阶段提示音是 `0.05`),只当秒针/呼吸拍用,不与提示音的方向性设计抢辨识度:
+  - `prepare`:每秒一声 587Hz(与 `TONES.prepare` 同族),听起来是在倒数;
+  - `rest`:**不**每秒响(30 秒休息响 30 下与「轻柔」相反)——4 秒吸 / 4 秒呼的呼吸节律,每个半周期开头一声(吸 392Hz、呼 330Hz,各 240ms);最后 3 秒切成 440Hz 每秒倒数,预告下一组要开始;
+  - `contract` / `hold` / `relax` 不加:用力阶段每秒响会盖掉「上行/平音/下行」的方向感。
+
+  实现:`PHASE_TICKS[phase](secLeft, durationSec)` + 模块级 `lastTickSecLeft`,由 `step()` 的 100ms 循环驱动(**不新开定时器**)。判据是「阶段内剩余整秒数变了才响」——暂停、后台切回、阶段边界都靠这条自然收敛:回前台时剩余秒数直接跳到新值,只响一声,不会把落后的拍子补齐成一串。`seedPhaseTick(state)` 在阶段推进 / 开始 / 恢复 / 切回前台时重新播种,`secLeft <= 0` 那声不响(紧接着就是阶段切换的提示音,叠在一起像重音)。
+
 **语音播报**:Web Speech API `speechSynthesis`,zh-CN,按阶段播报"准备/收紧/保持/放松/休息/完成"。`settings.voice` 控制开关,**默认关**——语音走扬声器外放,而本应用的典型使用场景(办公室、卫生间)多为公共/半公共环境;提示音本身已按方向可分辨,不开语音也能不看屏幕。**iOS 要求首次 `speak` 发生在用户手势里**,否则之后的播报被静默丢弃——`primeVoice()` 在开始按钮的点击处理器里跑一次 `volume:0` 的空白话来"开锁"。切阶段时先 `speechSynthesis.cancel()` 让位,避免播报堆积、落后于画面。
 
 **震动**:`navigator.vibrate` 存在且 `settings.vibration` 时,按阶段各不同的 pattern(contract/hold/relax/rest/done)。
 
 - 屏幕常亮:start 时 `navigator.wakeLock?.request('screen')` try/catch,done/stop 时 release。
-- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`:`#opt-sound`、`#opt-voice`、`#opt-vibration`(均为 `.switch`),提醒 `#opt-reminder-enabled` + `<input type="time" id="opt-reminder-time">`,下方小字说明不开语音也能靠音高方向分辨阶段、以及语音开启后会外放需留意公共场合,和"网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳"。开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
+- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`:`#opt-sound`、`#opt-soft-cue`、`#opt-voice`、`#opt-vibration`(均为 `.switch`),提醒 `#opt-reminder-enabled` + `<input type="time" id="opt-reminder-time">`,下方小字说明不开语音也能靠音高方向分辨阶段、以及语音开启后会外放需留意公共场合,和"网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳"。`#opt-soft-cue`(轻提示)独立于 `#opt-sound`,但受其约束——总开关关掉后轻提示也不响。开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
 - `.switch`:v1 是原生 checkbox(iOS 上渲染成带蓝色聚焦框的方块勾,与整体视觉不搭);v2 改成 `appearance: none` 自绘的 iOS 风格开关(胶囊轨道 + 圆形滑块,`:checked` 切换位置与背景色)。
 
 ### 统计 tab
@@ -370,7 +378,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 70 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 71 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -385,7 +393,7 @@ achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` |
 | 分享弹窗 | `dlg-share` `share-img` `btn-save-share` `btn-share-close` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
-| 设置弹窗 | `dlg-settings` `opt-sound` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
 
 ### §8.z 全站计数(顶栏第二行:此刻在做人数 + 总访问)

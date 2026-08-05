@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS = {
   holdSec: 0,            // 「维持」阶段秒数,0=关闭;全局值,叠加在任何方案(含 custom)之上
   sound: true,
   voice: false,          // 语音播报阶段名;默认关 —— 会外放,而本应用的典型使用场景多在公共/半公共环境
+  softCue: true,         // 阶段内轻提示:准备倒数每秒轻响 + 休息期呼吸引导;受 sound 总开关约束
   vibration: true,
   reminder: { enabled: false, time: '21:00' },
 };

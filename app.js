@@ -100,6 +100,7 @@ const el = {
 
   dlgSettings: $('dlg-settings'),
   optSound: $('opt-sound'),
+  optSoftCue: $('opt-soft-cue'),
   optVoice: $('opt-voice'),
   optVibration: $('opt-vibration'),
   optReminderEnabled: $('opt-reminder-enabled'),
@@ -213,7 +214,7 @@ function ensureAudioContext() {
   }
 }
 
-function beep(freq, ms = 150, delaySec = 0) {
+function beep(freq, ms = 150, delaySec = 0, peak = 0.05) {
   if (!audioCtx || !data.settings.sound) return;
   try {
     const t0 = audioCtx.currentTime + delaySec;
@@ -223,7 +224,7 @@ function beep(freq, ms = 150, delaySec = 0) {
     osc.type = 'sine';
     osc.frequency.setValueAtTime(freq, t0);
     gain.gain.setValueAtTime(0.0001, t0);
-    gain.gain.exponentialRampToValueAtTime(0.05, t0 + 0.012);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, peak), t0 + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
     osc.connect(gain);
     gain.connect(audioCtx.destination);
@@ -264,6 +265,69 @@ const VIBRATIONS = {
   rest: [30, 60, 30],
   done: [80, 60, 80],
 };
+
+/**
+ * 阶段内的轻提示(R2/R3)。
+ * 反馈:准备阶段只有进入时那一声、休息阶段全程静默 —— 根因都是 cueFor 只在阶段边界响一次,
+ * 阶段内部没有任何声音通道。这里补上一条,音量刻意比阶段提示音轻一个数量级
+ * (peak 0.012 vs 0.05),只当「秒针 / 呼吸拍」用,不跟提示音的方向性设计(见 TONES)抢辨识度。
+ *
+ * - `prepare`:每秒一声 587Hz(与 TONES.prepare 同族),听起来就是在倒数。
+ * - `rest`:**不**每秒响 —— 30 秒休息响 30 下与「轻柔」相反。改成 4 秒吸 / 4 秒呼的呼吸节律,
+ *   每个半周期开头一声(吸 392Hz、呼 330Hz);最后 3 秒切成 440Hz 每秒倒数,预告要开始了。
+ * - contract/hold/relax 不加:用力阶段每秒响会盖掉「上行/平音/下行」的方向感,反而更吵。
+ *
+ * 回调签名 (secLeft, durationSec) → 是否发声由函数自己决定(返回值不用,静默即不响)。
+ */
+const BREATH_HALF_SEC = 4;   // 呼吸半周期:4 秒吸、4 秒呼
+const REST_COUNTDOWN_SEC = 3; // 休息末段改成每秒倒数的秒数
+
+const PHASE_TICKS = {
+  prepare: () => { beep(587, 55, 0, 0.012); },
+  rest: (secLeft, durationSec) => {
+    if (secLeft <= REST_COUNTDOWN_SEC) {
+      beep(440, 70, 0, 0.012);
+      return;
+    }
+    // 用「已过秒数」定呼吸相位,休息时长长短都能对齐到进入休息那一刻
+    const elapsed = Math.max(0, Math.round(durationSec - secLeft));
+    const posInCycle = elapsed % (BREATH_HALF_SEC * 2);
+    if (posInCycle === 0) beep(392, 240, 0, 0.012);              // 吸
+    else if (posInCycle === BREATH_HALF_SEC) beep(330, 240, 0, 0.012); // 呼
+  },
+};
+
+// 上一次播过节拍的「阶段内剩余整秒数」;null = 本阶段还没播过/不该播。
+// 存剩余秒数而不是计数器,是为了让暂停、后台切回、阶段边界都能靠「值变了才响」自然收敛:
+// 回前台时剩余秒数直接跳到新值,只响一声,不会把落后的拍子补齐成一串。
+let lastTickSecLeft = null;
+
+/** 阶段切换时重新播种:进入瞬间那声由 cueFor 负责,节拍从下一整秒才开始。 */
+function seedPhaseTick(state) {
+  if (!isRunning(state) || state.paused || !PHASE_TICKS[state.phase]) {
+    lastTickSecLeft = null;
+    return;
+  }
+  lastTickSecLeft = Math.ceil(remainingInPhaseMs(state, Date.now()) / 1000);
+}
+
+/**
+ * 每个渲染帧调一次:阶段内剩余整秒数变化时播一声轻 tick。
+ * 只在 sound 开 + 设置里开了节拍 + 当前阶段有节拍定义时发声。
+ */
+function maybePhaseTick(state) {
+  const tickFn = PHASE_TICKS[state.phase];
+  if (!tickFn || !isRunning(state) || state.paused || !data.settings.softCue) {
+    lastTickSecLeft = null;
+    return;
+  }
+  const secLeft = Math.ceil(remainingInPhaseMs(state, Date.now()) / 1000);
+  if (secLeft === lastTickSecLeft) return;
+  lastTickSecLeft = secLeft;
+  // 剩 0 秒那声不响:紧接着就是阶段切换的提示音,两声叠在一起听着像重音
+  if (secLeft <= 0) return;
+  tickFn(secLeft, phaseDurationSec(state.config, state.phase));
+}
 
 /**
  * iOS 要求 speechSynthesis 的第一次 speak 发生在用户手势里,否则之后的播报会被静默丢弃。
@@ -560,6 +624,9 @@ function renderBadges(today) {
 
 function renderSettingsForm() {
   el.optSound.checked = !!data.settings.sound;
+  el.optSoftCue.checked = !!data.settings.softCue;
+  // 轻提示是提示音的子集:总开关关了,这一项没有意义
+  el.optSoftCue.disabled = !data.settings.sound;
   el.optVoice.checked = !!data.settings.voice;
   el.optVibration.checked = !!data.settings.vibration;
   el.optReminderEnabled.checked = !!data.settings.reminder.enabled;
@@ -611,6 +678,8 @@ function step() {
       next.repIndex !== prev.repIndex;
     if (advanced) {
       cueFor(next.phase);
+      // 进入瞬间那声归 cueFor;节拍从下一整秒起,免得两声叠在一起
+      seedPhaseTick(next);
       enterPhaseVisual(next);
       if (next.phase === 'done') {
         stopLoop();
@@ -619,6 +688,7 @@ function step() {
     }
   }
 
+  maybePhaseTick(session);
   renderTrain();
 }
 
@@ -680,6 +750,7 @@ function resetSession() {
   stopLoop();
   releaseWakeLock();
   session = createSession(resolveConfig());
+  lastTickSecLeft = null;
   el.donePanel.hidden = true;
   enterPhaseVisual(session);
   renderPlanSummary();
@@ -853,6 +924,7 @@ el.btnStart.addEventListener('click', () => {
   const now = Date.now();
   session = start(session, now);
   cueFor(session.phase);
+  seedPhaseTick(session);
   enterPhaseVisual(session);
   requestWakeLock();
   startLoop();
@@ -865,12 +937,14 @@ el.btnPause.addEventListener('click', () => {
   if (session.paused) {
     session = resume(session, now);
     syncCircleToRemaining(session);
+    seedPhaseTick(session);
     startLoop();
   } else {
     session = pause(session, now);
     if (session.paused) {
       stopLoop();
       stopSpeaking();
+      lastTickSecLeft = null;
       freezeCircle();
     }
   }
@@ -980,6 +1054,13 @@ el.btnSettings.addEventListener('click', () => {
 el.optSound.addEventListener('change', () => {
   data.settings.sound = el.optSound.checked;
   persist();
+});
+
+el.optSoftCue.addEventListener('change', () => {
+  data.settings.softCue = el.optSoftCue.checked;
+  persist();
+  // 训练中改开关:重新播种,免得刚打开就立刻补一声
+  seedPhaseTick(session);
 });
 
 el.optVoice.addEventListener('change', () => {
@@ -1220,6 +1301,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (!isRunning(session) || session.paused) return;
   syncCircleToRemaining(session);
+  // 后台期间秒数已经跳过好几拍,重新播种,免得切回来先补响一声不对位的 tick
+  seedPhaseTick(session);
   renderTrain();
 });
 

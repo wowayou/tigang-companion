@@ -19,8 +19,8 @@
 | # | 反馈 | 类型 | 上下文 / 建议 | 撞红线? |
 |---|---|---|---|---|
 | 1 | **导入/导出更扎实,不同设备间记录处理好** | 功能增强 | 现有:导出备份(`tigang-YYYYMMDD-HHmmss.json`)+ 导入两档「合并/替换」(见 D27)。「不同设备」= 跨设备迁移体验:可加强**校验容错、去重、导入预览**,或提供**迁移引导文案**。**不要做云同步**(G2 gated,撞「数据只在本地」) | 无(保持本地) |
-| 2 | **开始前倒计时只有第一声,突兀** | UX/音效 | `prepare` 阶段只在进入时播一次 587Hz(`TONES.prepare`)。建议进入瞬间保留一声,之后**每秒一个轻 tick**(呼应 `countdown` 数字)。改动点在 `cueFor`/`tick` 阶段推进处,纯 app.js | 无 |
-| 3 | **休息时完全没有音效,不够优雅** | UX/音效 | `rest` 阶段只播一次低音(392Hz 240ms)。反馈希望休息期间有**轻柔节拍/呼吸引导**(注意外放场景,可做成设置开关或降音量)。同 2,改动在 app.js 音效层 | 无 |
+| 2 | ~~**开始前倒计时只有第一声,突兀**~~ ✅ 已完成(D30) | UX/音效 | `prepare` 进入那声保留,之后每秒一声 587Hz 轻 tick(peak 0.012)。设置里「轻提示」开关(`settings.softCue`,默认开) | 无 |
+| 3 | ~~**休息时完全没有音效,不够优雅**~~ ✅ 已完成(D30) | UX/音效 | `rest` 做成 4 秒吸(392Hz)/ 4 秒呼(330Hz)呼吸节律,末 3 秒 440Hz 每秒倒数;短休息自动退化为纯倒数。同一个「轻提示」开关 | 无 |
 | 4 | **排行榜 or 讨论区?** | 讨论/未决 | 撞 **G1**(排行榜需匿名参与者+后端+隐私口径;先例:time-logger R3——要么真数字要么不做)。**不建议近期做**,维持 gated | G1 |
 | 5 | **计数固定 header 太侵入,调研替代方案** | 调研→改版 | 见下方 §3 调研结论 | 无 |
 
@@ -46,10 +46,11 @@
 - **命令**:`npm test`(core/ 改动必跑,裸 `node --test`);`node tools/build-site.mjs`(组装 dist);`git push`(CI 自动:测试→Pages→计数 Worker,Worker 需 `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets,已配置)。
 - **红线**:零依赖(不加 npm 包/CDN);`core/` 禁 DOM / `Date.now()` / `localStorage`;计数 Worker 是「零后端」唯一例外;发版升 `sw.js` 的 `CACHE_NAME`;改接口(函数签名/状态字段/DOM id)同步 SPEC;「维持」`holdSec` 是全局键,`holdSec=0` 必须等价 v1 两段式。
 - **计数 Worker 本地验证**:`cd worker && npx wrangler dev`(会生成 `worker/.wrangler/`,已 gitignore);协议 + Hibernation 坑见 `worker/worker.js` 顶部注释与 D28。改 WebSocket 逻辑前**先确认走类方法还是 addEventListener**。
-- **建议接手顺序**:① 音效 2/3(小、快、用户明确反馈)→ ② 导入导出跨设备 1 → ③ 计数放置 5(已有调研,可立项)→ ④ 排行榜 4(维持 gated,不动)。
+- **建议接手顺序**:① ~~音效 2/3~~ ✅ 已完成(D30)→ ② 导入导出跨设备 1 → ③ 计数放置 5(已有调研,可立项)→ ④ 排行榜 4(维持 gated,不动)。
 
 ## 5. 交接时已验证
 
 - 计数:训练会话存活期间线上 `/stats` 返回 `doing:1`(2026-08-05 实测)。
-- 落地页:无「换了域名」段落;应用:`btn-share`/`dlg-share` 已上线;`sw.js` = `tigang-v11`。
-- 测试:`npm test` 78 全绿;`node --check` 全过;构建正常。
+- 落地页:无「换了域名」段落;应用:`btn-share`/`dlg-share` 已上线;`sw.js` = `tigang-v12`(R2/R3 发版已升)。
+- 测试:`npm test` 78 全绿;`node --check` 全过;构建正常;app.js 引用的 71 个 DOM id 全部存在于 index.html。
+- R2/R3 轻提示:一次性脚本喂 `maybePhaseTick` 真实源码,确认 prepare 3 声倒数、rest 呼吸拍 392/330 交替 + 末 3 秒 440、后台跳变不补拍、暂停静音、开关关闭全静、用力阶段无声、短休息(1–8s)退化为纯倒数。

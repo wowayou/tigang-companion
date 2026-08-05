@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-提肛(凯格尔)训练陪伴 PWA。零依赖、无构建、无后端,数据全在 localStorage。
-唯一的例外是顶栏那行「此刻多少人在做 · 总访问」的全站计数:它走自建 Cloudflare Worker + Durable Object(`worker/`,不引任何第三方统计服务),客户端逻辑全在 app.js,core/ 依旧纯函数。
+提肛(凯格尔)训练陪伴 PWA。零依赖、无构建,数据全在 localStorage,核心无后端。
+唯二例外(均 opt-in,不引任何第三方):① 顶栏「此刻多少人在做 · 总访问」全站计数,走自建 Cloudflare Worker + Durable Object(`worker/`);② 多端同步(可选 · 端到端加密),走自建甲骨文后端 `sync-server/`(只存密文,主密码不离开设备)。客户端逻辑全在 app.js,core/ 依旧纯函数。
 
 ## 命令
 

@@ -189,7 +189,7 @@ export const DEFAULT_SETTINGS = {
 
 // storage 参数默认 globalThis.localStorage,测试传 fake {getItem,setItem,removeItem}。
 // 任何异常/损坏 JSON → 返回全新默认值 { records: [], settings: <DEFAULT_SETTINGS 深拷贝> }。
-// settings 与 DEFAULT_SETTINGS 做浅合并 + reminder/custom 二级合并(旧版本数据升级后不丢新默认键)。
+// settings 与 DEFAULT_SETTINGS 做浅合并 + reminder/custom/sync 二级合并(旧版本数据升级后不丢新默认键)。
 export function load(storage) {}
 export function save(data, storage) {}       // 成功 true,异常(如超配额)捕获后返回 false
 export function clearAll(storage) {}
@@ -500,5 +500,9 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 13. **数据导入 + 导出优化**:新增「导入备份」(合并 / 替换两档,`core/storage.js` 新增纯函数 `parseBackup` / `mergeRecords`);导出文件名带时间戳 `tigang-YYYYMMDD-HHmmss.json`,iOS 主屏 PWA 走 `navigator.share` 落盘(Blob + a.download 在 iOS 常不落盘)。
 14. **部署形态改为 落地页 + /app/**:新增 `site/` 落地页(根路径,品牌 KegelMate · 提肛陪伴)与 `tools/build-site.mjs` 组装脚本(根=site/,`/app/`=sw.js 预缓存清单,单一真源);GitHub Pages 部署 `dist/`,Workflow 新增 `deploy-worker` 自动部署计数 Worker(secrets 未配时优雅跳过)。自定义域名形态参考 time-logger:`https://…/app/` 放应用、根放落地页(见 DEPLOY.md)。
 15. **ROADMAP.md**:增长机制路线图(分享卡 / 第 N 位使用者 / 安装引导 / Web Push 等,分 Next/Mid/Gated),见 `ROADMAP.md`。
+
+再一轮修订(`CACHE_NAME` → `tigang-v13`):
+
+16. **多端同步(可选 · 端到端加密,自建后端)**:新增 `core/sync.js`(encryptBlob/decryptBlob/mergeForSync/newUserId,纯函数可迁移 time-logger)、`sync/client.mjs`(origin 参数化的浏览器客户端,零依赖)、`sync-server/`(自建 Node 后端,只存密文,部署见 `sync-server/README.md`)。设置弹窗新增同步组(`#opt-sync-enabled`/`#opt-sync-master`/`#btn-sync-now`/`#sync-last`/`#sync-state`);`DEFAULT_SETTINGS` 加 `sync:{enabled:false}`;record 加可选 `ts`。主密码只进内存不落盘(重开应用重输),userId 走独立 key `tigang_sync_user`。契约见 §6.z。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

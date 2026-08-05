@@ -203,9 +203,9 @@
 - **ts schema 向后兼容**:record 可带可选 `ts`(毫秒时间戳,`app.js writeRecord` 注入 `Date.now()`,Date.now 只在胶水层);旧记录无 ts 视为 0,`mergeForSync` 内按缺失=0,旧数据不强制升级。
 - **时区**:dateStr 仍是本地 `YYYY-MM-DD`(D5 防线不变);ts 只作 LWW 辅助(同 dateStr 冲突时取较大者),不含时区语义。跨时区设备在同一天内时差可能让 LWW 略有先后,但不会丢日期维度。
 - **已知限制**:① PWA 不后台同步——只在打开应用时同步;② 同 dateStr 同内容(撞指纹)去重;③ **同一天多次不同内容的训练按「日」合并,LWW 只留 ts 最大的一条**(按日粒度的刻意简化;要按「次」保留需给记录加唯一 id,属设计变更);④ 主密码丢失=远端密文不可恢复(本地不丢);⑤ 限流 1 次/10s per userId + 20 次/分 per IP;⑥ 单机房凤凰城,机器挂=同步断(降级本地不丢);⑦ 迁移性:client.mjs 抽象了 origin,未来可换 Worker 后端,端到端加密不变;⑧ **服务端 SQLite 文件无内建备份**——文件损坏/误删 = 全部用户远端密文丢失(因端到端加密,用户本地数据不丢,下次同步重推即恢复,但中短期内全员同步状态被重置)。部署侧必须配 cron 备份(见 sync-server/README.md)。
-- **app.js 接线 + 主密码内存态 + 离线跳过 + userId 独立 key**:
+- **app.js 接线 + 主密码缓存策略 + 离线跳过 + userId 独立 key**:
   - `SYNC_ORIGIN`(自建甲骨文)与计数 Worker 的 `COUNTER_ORIGIN` **解耦**——不同址不同服务。
-  - 主密码只进内存(会话内),不存 localStorage;重开应用重输。忘了主密码=远端不可恢复、本地不丢,重输=重新开始同步。
+  - **主密码缓存策略(2026-08-05 优化)= sessionStorage 会话级缓存**(键 `tigang_sync_pass`,输入即写):tab 内刷新不丢,**关 tab 丢**;PWA 从主屏图标启动有时算新会话也丢=可接受降级(回到老流程进设置输一次,不崩)。**不进 localStorage、不进 settings/exportJSON**——硬要塞 localStorage 虽能跨会话保主密码,但凭据寿命被拉长到与用户数据同生命周期,破坏隐私基调,拒绝。诚实权衡:**sessionStorage 仍可被同源 XSS 读,与 userId(localStorage 明文)同风险等级**;要再短命只能每次输——选「会话级缓存」是便利/安全的折中。忘了主密码=远端不可恢复、本地不丢,重输=重新开始同步。
   - 离线(`!navigator.onLine`)跳过;`persist()` 后 debounce 2s 推。
   - **不同主密码 → 解密失败 → 静默降级本地,UI 显示「解密失败」——这是端到端加密的正确表现,非 bug**。
   - userId 走独立 key `tigang_sync_user`(明文可接受:泄露只意味着别人可覆盖密文,无主密码解不开,本地可重推恢复),不进 settings/exportJSON。

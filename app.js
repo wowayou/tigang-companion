@@ -152,7 +152,10 @@ const DEFAULT_HOLD_SEC = 5;
 // 换后端(未来若回 Worker / 本地开发)只改这一行,端到端加密不变。
 const SYNC_ORIGIN = 'https://sync.eigentime.org';
 const SYNC_USER_KEY = 'tigang_sync_user'; // userId 独立 key,明文可接受——泄露只意味着别人可覆盖密文,无主密码解不开,本地可重推恢复
+const SYNC_PASS_KEY = 'tigang_sync_pass'; // 主密码会话级缓存(sessionStorage):tab 内刷新不丢,关 tab 丢;不进 localStorage(隐私基调,见 §6.z)
 const SYNC_PUSH_DEBOUNCE_MS = 2000; // persist() 后防抖推
+// 设置弹窗「同步」组容器(无新 id,class 选择):开关关时整组 hidden 收起
+const syncSetupWrap = document.querySelector('.sync-setup');
 
 /* ------------------------------------------------------------------ *
  * 运行时状态
@@ -171,11 +174,12 @@ let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HO
 let idleHintText = '';
 // 最近一次完成的训练,供「分享今天的成果」画卡片用(reps / streak / 日期)
 let shareData = null;
-// 同步状态(单元 3):主密码只进内存,绝不落盘;页面会话内有效,重开应用需重输
+// 同步状态(单元 3):主密码只在内存 + sessionStorage(tab 内刷新不丢,关 tab / PWA 新会话丢=降级重输),绝不进 localStorage
 let syncMasterPass = '';
 let syncUserId = ''; // 首次启用时 newUserId() 生成,存 localStorage 独立 key(不进 settings/exportJSON)
 let syncPushTimer = null;
 let syncLastAt = null; // 上次成功同步的毫秒时间戳
+let syncRemoteEmpty = false; // 远端返回过 'none'=首次/远端暂无数据,据此跳过 pull 直接推(见 syncNow)
 
 /* ------------------------------------------------------------------ *
  * 小工具
@@ -651,10 +655,16 @@ function renderSettingsForm() {
   el.optVibration.checked = !!data.settings.vibration;
   el.optReminderEnabled.checked = !!data.settings.reminder.enabled;
   el.optReminderTime.value = data.settings.reminder.time || '21:00';
-  // 同步:开关回填;状态行(主密码字段不在此回填——不存盘,见 btnSettings 打开时清空)
+  // 同步:开关回填;主密码/按钮/状态组按开关 hidden 收起;主密码从会话级缓存回填(sessionStorage,见 §6.z)
   el.optSyncEnabled.checked = syncEnabled();
+  if (syncSetupWrap) syncSetupWrap.hidden = !syncEnabled();
+  if (el.optSyncMaster) el.optSyncMaster.value = syncMasterPass;
+  updateSyncButtonLabel();
   if (el.syncLast) el.syncLast.textContent = syncLastAt ? formatSyncTime(syncLastAt) : '—';
-  if (el.syncState && !el.syncState.textContent) el.syncState.textContent = '—';
+  if (el.syncState && !el.syncState.textContent) {
+    el.syncState.textContent = '—';
+    el.syncState.classList.remove('sync-ok', 'sync-err', 'sync-busy');
+  }
 }
 
 function renderPresetForm() {
@@ -1072,8 +1082,7 @@ TABS.forEach((t, i) => {
 
 el.btnSettings.addEventListener('click', () => {
   renderSettingsForm();
-  // 主密码不存盘:每次打开设置,输入框清空(内存值仍在会话内生效,重开应用需重输)
-  if (el.optSyncMaster) el.optSyncMaster.value = '';
+  // 主密码不落盘,但会话级缓存(sessionStorage)会回填到输入框;真正清空只发生在「关同步/主动清空」
   if (typeof el.dlgSettings.showModal === 'function') el.dlgSettings.showModal();
   else el.dlgSettings.setAttribute('open', '');
 });
@@ -1137,20 +1146,37 @@ el.optReminderTime.addEventListener('change', () => {
   scheduleReminder();
 });
 
-/* 同步开关:只改 settings.sync.enabled(主密码/userId 都不进 settings)。 */
+/* 同步开关:只改 settings.sync.enabled(主密码/userId 都不进 settings)。开=展开主密码组并聚焦;关=清主密码(内存 + sessionStorage)。 */
 el.optSyncEnabled.addEventListener('change', () => {
   data.settings.sync.enabled = el.optSyncEnabled.checked;
-  persist();
-  renderSettingsForm();
+  if (el.optSyncEnabled.checked) {
+    persist();
+    renderSettingsForm();
+    // 首次启用引导:主密码组已展开,直接聚焦等待输入
+    el.optSyncMaster.focus();
+  } else {
+    // 关闭同步:主密码内存态 + sessionStorage 一并清空,状态复位,不再自动同步
+    clearSyncPass();
+    syncRemoteEmpty = false;
+    syncNowState('—');
+    persist();
+    renderSettingsForm();
+  }
 });
 
-/* 主密码:进内存(不落盘)。输完即触发一次同步拉回远端数据。 */
+/* 主密码:进内存 + sessionStorage(会话级缓存,输入即写;不进 localStorage/后端)。同步由「同步」按钮触发(避免输完自动同步又点按钮撞限流)。 */
+el.optSyncMaster.addEventListener('input', () => {
+  syncMasterPass = el.optSyncMaster.value;
+  saveSyncPass(syncMasterPass);
+  updateSyncButtonLabel();
+});
+
 el.optSyncMaster.addEventListener('change', () => {
   syncMasterPass = el.optSyncMaster.value;
-  if (syncMasterPass && syncEnabled()) {
-    syncNow();
-  } else if (syncMasterPass) {
-    syncNowState('已记录主密码,启用同步后生效');
+  saveSyncPass(syncMasterPass);
+  updateSyncButtonLabel();
+  if (syncMasterPass) {
+    syncNowState(syncEnabled() ? '主密码已记录,点「同步」按钮开始' : '已记录主密码,启用同步后生效');
   } else {
     syncNowState('请先输入主密码');
   }
@@ -1545,8 +1571,43 @@ function syncEnabled() {
   return !!data.settings.sync && !!data.settings.sync.enabled;
 }
 
-function syncNowState(text) {
-  if (el.syncState) el.syncState.textContent = text || '—';
+/** 状态行:文案 + 状态色(sync-ok 成功绿 / sync-err 失败橙 / sync-busy 进行中灰)。 */
+function syncNowState(text, cls) {
+  if (!el.syncState) return;
+  el.syncState.textContent = text || '—';
+  el.syncState.classList.remove('sync-ok', 'sync-err', 'sync-busy');
+  if (cls) el.syncState.classList.add(cls);
+}
+
+/* 主密码会话级缓存:sessionStorage(tab 内刷新不丢,关 tab / PWA 新会话丢=降级重输,不崩)。
+ * 不进 localStorage、不进 settings/exportJSON —— 与 userId(localStorage 明文)同风险等级的诚实取舍,见 DEVELOPMENT.md D31。 */
+function saveSyncPass(pass) {
+  try {
+    if (pass) sessionStorage.setItem(SYNC_PASS_KEY, pass);
+    else sessionStorage.removeItem(SYNC_PASS_KEY);
+  } catch {
+    /* 隐私模式等不可用:静默,回到每会话输一次 */
+  }
+}
+
+function restoreSyncPass() {
+  try {
+    syncMasterPass = sessionStorage.getItem(SYNC_PASS_KEY) || '';
+  } catch {
+    syncMasterPass = '';
+  }
+}
+
+function clearSyncPass() {
+  syncMasterPass = '';
+  saveSyncPass('');
+}
+
+/** 首次启用引导:远端确认无数据(none)且主密码已输时,按钮文案改「首次同步(上传本机数据)」。 */
+function updateSyncButtonLabel() {
+  if (!el.btnSyncNow) return;
+  const firstTime = syncEnabled() && !!el.optSyncMaster.value && syncRemoteEmpty;
+  el.btnSyncNow.textContent = firstTime ? '首次同步(上传本机数据)' : '立即同步';
 }
 
 function formatSyncTime(t) {
@@ -1583,18 +1644,22 @@ async function doSyncPull() {
     const result = await syncPull(SYNC_ORIGIN, syncUserId);
     if (!result.ok) {
       if (result.error === 'none') {
+        // 远端无数据=首次:记标志,后续 syncNow 据此跳过 pull 直接推
+        syncRemoteEmpty = true;
         syncNowState('首次同步,等待推送');
         updateSyncLast();
+        updateSyncButtonLabel();
         return;
       }
-      if (result.error === 'network') syncNowState('连接失败,检查网络');
-      else syncNowState('拉取失败');
+      if (result.error === 'network') syncNowState('连接失败,检查网络', 'sync-err');
+      else syncNowState('拉取失败', 'sync-err');
       return;
     }
+    syncRemoteEmpty = false;
     const decrypted = await decryptBlob(result.blob, syncMasterPass);
     if (!decrypted.ok) {
       // 主密码不对 / 密文损坏(可能被覆盖):静默降级,本地数据不丢,可重推恢复
-      syncNowState('解密失败(主密码不符或远端数据损坏)');
+      syncNowState('解密失败(主密码不符或远端数据损坏)', 'sync-err');
       return;
     }
     const remoteRecords = (decrypted.data && decrypted.data.records) || [];
@@ -1603,9 +1668,10 @@ async function doSyncPull() {
     persist();
     renderStats();
     updateSyncLast();
-    syncNowState(conflicts > 0 ? `已合并(冲突 ${conflicts} 条按最新覆盖)` : '已同步');
+    updateSyncButtonLabel();
+    syncNowState(conflicts > 0 ? `已合并(冲突 ${conflicts} 条按最新覆盖)` : '已同步', 'sync-ok');
   } catch {
-    syncNowState('同步失败');
+    syncNowState('同步失败', 'sync-err');
   }
 }
 
@@ -1618,16 +1684,20 @@ async function doSyncPush() {
     const blob = await encryptBlob({ records: data.records, settings: data.settings }, syncMasterPass);
     const result = await syncPush(SYNC_ORIGIN, syncUserId, blob);
     if (result.ok) {
+      const wasFirst = syncRemoteEmpty; // 首次推送(远端此前无数据)→ 成功时给引导反馈
+      syncRemoteEmpty = false;
       updateSyncLast();
+      updateSyncButtonLabel();
+      if (wasFirst) syncNowState('已开启同步 · 本机数据已上传', 'sync-ok');
     } else if (result.error === 'rate') {
-      syncNowState('推送过频,稍后再试');
+      syncNowState('推送过频,稍后再试', 'sync-err');
     } else if (result.error === 'too-big') {
-      syncNowState('数据过大,无法同步');
+      syncNowState('数据过大,无法同步', 'sync-err');
     } else {
-      syncNowState('推送失败');
+      syncNowState('推送失败', 'sync-err');
     }
   } catch {
-    syncNowState('推送失败');
+    syncNowState('推送失败', 'sync-err');
   }
 }
 
@@ -1641,7 +1711,7 @@ function scheduleSyncPush() {
   }, SYNC_PUSH_DEBOUNCE_MS);
 }
 
-/** 「立即同步」:先拉后推(合并后把结果推回去)。 */
+/** 「立即同步」:先拉后推(合并后把结果推回去);首次(远端确认过 none)跳过 pull 直接推。 */
 async function syncNow() {
   if (!syncEnabled()) {
     syncNowState('未启用同步');
@@ -1659,17 +1729,20 @@ async function syncNow() {
     clearTimeout(syncPushTimer);
     syncPushTimer = null;
   }
-  syncNowState('同步中…');
-  await doSyncPull();
-  // doSyncPull 内部 persist() 会再排一个 debounce 推;这里立即推,把那个定时器清掉,避免 10s 内二次 PUT 撞限流
-  if (syncPushTimer !== null) {
-    clearTimeout(syncPushTimer);
-    syncPushTimer = null;
+  syncNowState('同步中…', 'sync-busy');
+  // 首次(远端返回过 none)→ 纯推,不 pull;否则先拉后推
+  if (!syncRemoteEmpty) {
+    await doSyncPull();
+    // doSyncPull 内部 persist() 会再排一个 debounce 推;这里立即推,把那个定时器清掉,避免 10s 内二次 PUT 撞限流
+    if (syncPushTimer !== null) {
+      clearTimeout(syncPushTimer);
+      syncPushTimer = null;
+    }
   }
   await doSyncPush();
 }
 
-/** 打开应用时:若启用且主密码已输入(本会话内)则后台拉一次。重开应用主密码为空,需在设置里重输才同步。 */
+/** 打开应用时:若启用且主密码可用(本会话输入或 sessionStorage 回填)则后台拉一次。新会话无缓存=降级重输,不崩。 */
 function syncOnOpen() {
   if (!syncEnabled() || !syncMasterPass || !navigator.onLine) return;
   doSyncPull();
@@ -1688,7 +1761,8 @@ renderStats();   // 先算统计:renderTrain 空闲态那行要用 idleHintText
 renderTrain();
 scheduleReminder();
 counter.init();  // 全站计数:此刻在做人数 + 总访问
-syncOnOpen();    // 多端同步:启用且本会话已输主密码才拉(重开应用主密码为空,需在设置里重输)
+restoreSyncPass(); // 主密码会话级缓存回填(tab 内刷新不丢;新会话丢=降级到设置里输一次)
+syncOnOpen();    // 多端同步:启用且主密码可用(sessionStorage 回填)才拉
 
 /* ------------------------------------------------------------------ *
  * Service Worker(http:// 或不支持时静默失败)

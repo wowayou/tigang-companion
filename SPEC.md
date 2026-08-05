@@ -273,12 +273,13 @@ export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
 - **记录 schema**:record 可带可选 `ts`(毫秒时间戳,`app.js writeRecord` 注入 `Date.now()`);旧记录无 ts 视为 0,向后兼容。
 - **浏览器客户端**(`sync/client.mjs`):`syncPull/syncPush/syncProbe`,origin 参数化,AbortController 10s 超时,任何失败 `{ok:false,error}` 不抛;CORS 失败与断网统一 `'network'`。
 - **userId 独立 key**(`tigang_sync_user`,明文 localStorage):不进 settings、不进 exportJSON。泄露只意味着别人可覆盖密文,无主密码解不开,本地可重推恢复。
-- **主密码内存态**:不存 localStorage;每次开应用在设置里重输(忘了主密码=远端密文不可恢复,**本地数据不丢**,重输=重新开始同步)。会话内保留于内存(弹窗关闭不清),页面关闭即丢。
+- **主密码缓存策略(会话级,2026-08-05 优化)**:主密码不进 localStorage / settings / exportJSON,只进内存 + `sessionStorage`(键 `tigang_sync_pass`,输入即写)。**sessionStorage 生命周期=tab 会话**:同一 tab 内刷新不丢,关 tab 丢;PWA 从主屏图标启动有时算新会话也丢——属可接受降级,丢=回到「进设置输一次」的老流程,不崩。**用户主动改主密码→覆盖写新值;关闭同步→清空**。忘了主密码=远端密文不可恢复,**本地数据不丢**,重输=重新开始同步。权衡(同源 XSS 可读,与 userId 明文同风险等级)见 DEVELOPMENT.md D31。
 - **同步时机**(无新定时器):
-  - 打开应用:若 `sync.enabled && 主密码已输入(本会话)` → 后台 pull → decrypt → merge(只合记录,设置保留本机)→ save → renderStats;任一步失败静默降级纯本地。
+  - 打开应用:若 `sync.enabled && 主密码可用(本会话输入或 sessionStorage 回填)` → 后台 pull → decrypt → merge(只合记录,设置保留本机)→ save → renderStats;任一步失败静默降级纯本地。
+  - 首次启用引导:勾「启用同步」自动展开主密码组并聚焦;`doSyncPull` 收到远端 `none`(无数据)记 `syncRemoteEmpty` 标志,`syncNow` 据此**跳过 pull 直接推**(首次纯 push);首次推送成功状态显示「已开启同步 · 本机数据已上传」。
   - `persist()` 后:debounce 2s,若启用且有主密码且在线 → encrypt → push;失败静默,下次打开重试。
   - 离线(`!navigator.onLine`)跳过。
-- **UI**(设置弹窗一组,新增 DOM id 见 §8.x):`#opt-sync-enabled` `#opt-sync-master` `#btn-sync-now` `#sync-last` `#sync-state`。
+- **UI**(设置弹窗一组,新增 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#btn-sync-now` `#sync-last` `#sync-state`;主密码/按钮/状态行包在无 id 的 `.sync-setup` 容器内,**开关关时 `hidden` 收起整组**;状态行按 `sync-ok`(成功绿)/`sync-err`(失败橙)/`sync-busy`(进行中灰)着色。
 - **正确性说明**:**不同主密码 → 解密失败 → 静默降级本地、UI 显示「解密失败」** 是端到端加密的正确表现,不是 bug;离线打开纯本地不报错。
 
 ## §7 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
@@ -504,5 +505,9 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 再一轮修订(`CACHE_NAME` → `tigang-v13`):
 
 16. **多端同步(可选 · 端到端加密,自建后端)**:新增 `core/sync.js`(encryptBlob/decryptBlob/mergeForSync/newUserId,纯函数可迁移 time-logger)、`sync/client.mjs`(origin 参数化的浏览器客户端,零依赖)、`sync-server/`(自建 Node 后端,只存密文,部署见 `sync-server/README.md`)。设置弹窗新增同步组(`#opt-sync-enabled`/`#opt-sync-master`/`#btn-sync-now`/`#sync-last`/`#sync-state`);`DEFAULT_SETTINGS` 加 `sync:{enabled:false}`;record 加可选 `ts`。主密码只进内存不落盘(重开应用重输),userId 走独立 key `tigang_sync_user`。契约见 §6.z。
+
+再一轮修订(`CACHE_NAME` → `tigang-v14`):
+
+17. **同步体验优化(主密码会话级缓存 + 首次引导 + UI 简化,默认仍可选取舍不变)**:主密码从「纯内存态」改为「内存 + `sessionStorage`(键 `tigang_sync_pass`,输入即写)」——tab 内刷新不丢、关 tab 丢,PWA 新会话丢=降级重输不崩;不进 localStorage/settings/exportJSON。首次启用引导:勾选自动展开主密码组并聚焦,远端确认无数据(`none`)后 `syncNow` 跳过 pull 直接推,首次推送成功提示「已开启同步 · 本机数据已上传」。UI:主密码/按钮/状态行包进 `.sync-setup`(无新 id)开关关时 `hidden` 收起;状态行按 `sync-ok`(绿)/`sync-err`(橙)/`sync-busy`(灰)着色。**core/sync.js 零改、后端/限流/合并逻辑零动**。契约见 §6.z,权衡见 DEVELOPMENT.md D31。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

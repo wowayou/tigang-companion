@@ -1,13 +1,20 @@
 # sync.service — 提肛陪伴同步后端(systemd unit 示例)
 #
 # 部署(甲骨文实例,用户执行):
-#   1. 把整个 sync-server/ 目录放到 /opt/sync-server(或改下面路径)。
-#   2. sudo cp sync.service /etc/systemd/system/sync.service
-#   3. sudo systemctl daemon-reload
-#   4. sudo systemctl enable --now sync
+#   1. sudo mkdir -p /opt/sync-server/data
+#      sudo cp sync-server/server.mjs /opt/sync-server/
+#   2. sudo cp sync-server/sync.service /etc/systemd/system/sync.service
+#   3. 改下面的 User/Group 为实际运行用户(本机是 drbsops,不是 ubuntu),
+#      并用 `which node` 确认 ExecStart 的 node 绝对路径。
+#      查看已安装的 unit:cat /etc/systemd/system/sync.service
+#   4. sudo systemctl daemon-reload && sudo systemctl enable --now sync
 #   5. 看日志:journalctl -u sync -f
+#   6. 验证:curl -s http://127.0.0.1:8787/health   → {"ok":true}
 #
 # Node 版本:24 实测无需 flag;若用 Node 22,ExecStart 需加 --experimental-sqlite。
+# 反代:本机是 1Panel + Docker OpenResty(无原生 nginx),在 1Panel 面板加反向代理,
+#      目标填 http://172.17.0.1:8787(容器访问宿主用 docker0 网关,不能用 127.0.0.1)。
+#      详见 DEPLOY-SYNC.md。
 
 [Unit]
 Description=KegelMate sync server (E2E-encrypted blob store, zero-dependency)
@@ -15,14 +22,18 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu            # 改成运行服务的用户(或 www-data)
-Group=ubuntu
+# 改成实际运行用户:本机 drbsops(原示例写 ubuntu 是通用占位)
+User=drbsops
+Group=drbsops
 WorkingDirectory=/opt/sync-server
-# Node 22 用:ExecStart=/usr/bin/node --experimental-sqlite server.mjs
+# node 路径用 `which node` 确认;nvm 装的通常在 ~/.nvm/versions/node/vXX/bin/node
+# Node 22 用:ExecStart=/usr/bin/node --experimental-sqlite /opt/sync-server/server.mjs
 ExecStart=/usr/bin/node /opt/sync-server/server.mjs
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
+# data/ 要可写(SQLite),属主须是上面的 User
+ReadWritePaths=/opt/sync-server/data
 
 [Install]
 WantedBy=multi-user.target

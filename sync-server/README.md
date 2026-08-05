@@ -27,7 +27,9 @@ PUT/GET 覆盖式存储加密 blob,后端**永不解密、不解析内容、不�
 ## SQLite 文件
 
 - 默认 `sync-server/data/sync.db`(可由环境变量 `DB_PATH` 覆盖),单表 `blobs(user_id, blob, updated_at, put_count)`。
-- **备份(必做)**:文件损坏/误删 = 全部用户远端密文丢失(端到端加密保住本地数据不丢,但全员同步状态被重置)。SQLite 单文件,拷贝即备份。最低限度配一个 cron,每天一次热备 + 滚动保留 7 份:
+- **备份(必做)**:文件损坏/误删 = 全部用户远端密文丢失(端到端加密保住本地数据不丢,但全员同步状态被重置)。
+- **本项目实际部署的甲骨文机已有 DRBS/restic → R2 增量加密备份**,备份路径含 `/opt`,`/opt/sync-server/data` 会被覆盖;按运维仓库规矩在 `drbs_restic_backup_paths` 显式加 `/opt/sync-server/data` 即可,**不需要下面的 cron**(见 `DEPLOY-SYNC.md` 阶段 2)。
+- 下面这套 cron 热备是给**没有备份体系的裸 VPS**准备的兜底方案。SQLite 单文件,但**不要直接 cp 活文件**(可能截到半写状态),用 `.backup` 在线热备:
   ```bash
   # /etc/cron.daily/sync-backup  (chmod +x)
   DB=/opt/sync-server/data/sync.db

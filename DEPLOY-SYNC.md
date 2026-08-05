@@ -6,12 +6,29 @@
 
 ---
 
+## 本机实际形态(2026-08-05 核实,与通用 VPS 不同)
+
+这台甲骨文实例不是"裸装 nginx 的 VPS",而是 **1Panel 面板机**:
+
+| 项 | 实际情况 |
+|---|---|
+| 反向代理 | **Docker 里的 OpenResty**(配置在 `/opt/1panel/apps/openresty/openresty/conf`),**没有原生 nginx**(`nginx -v` 报 command not found) |
+| 服务托管 | 1Panel 应用走 Docker;系统级服务走 systemd(如 `hysteria-server.service`) |
+| 证书 | 1Panel 面板内置「证书」功能(自动申请/续期),**不用 certbot** |
+| 备份 | DRBS/restic 增量加密 → Cloudflare R2,路径在 `server-ops-oracle-always-free` 仓库的 `ansible/roles/drbs_base/defaults/main.yml`。**已含 `/opt`,故 `/opt/sync-server/data` 会被兜底备份**——但按该仓库规矩仍应显式声明 |
+| 登录用户 | `drbsops`(**不是 `ubuntu`**——`sync.service` 里的 User/Group 要改成 drbsops) |
+| 运维红线 | 该仓库 AGENTS.md:不改 OpenResty/1Panel 配置、不新增监听端口须谨慎、live 操作由操作者本人在面板执行 |
+
+**因此反代方案 = systemd 跑后端在宿主 `127.0.0.1:8787` + 1Panel 面板加反向代理。**
+容器访问宿主机**不能用 `127.0.0.1`**(那是容器自己),要用 docker0 网关 `172.17.0.1`。
+
 ## 阶段 0:确认前置
 
-- [ ] 甲骨文凤凰城 always-free 实例已开机,SSH 能进。
-- [ ] 实例上已有 nginx 在跑(现有代理服务),`nginx -v` 有输出。
-- [ ] Node ≥ 22(`node --version`),`node:sqlite` 可用(24 无需 flag,22 需 `--experimental-sqlite`)。
+- [ ] 甲骨文凤凰城 always-free 实例已开机,SSH 能进(用户 `drbsops`)。
+- [ ] 1Panel 面板能登录(反代与证书都在面板里做)。
+- [ ] Node ≥ 22:`node --version`;记下 `which node` 的绝对路径(填进 sync.service)。
 - [ ] 手头能登录 Cloudflare DNS 控制台(eigentime.org 域名)。
+- [ ] 确认 docker0 网关地址:`ip addr show docker0 | grep inet`(通常 `172.17.0.1`)。
 
 ---
 
@@ -24,62 +41,70 @@
 3. 等 30 秒 ~ 1 分钟,`dig sync.eigentime.org` 应返回该 IP(灰云不回 Cloudflare IP)。
 4. **不要动**任何现有 DNS 记录(DNS 表里那些 MX/TXT/kegel/time/www)。
 
-> 为什么灰云:同步需要 nginx 精准掌控 CORS/OPTIONS,Cloudflare 代理可能干扰自定义响应头;且现有 kegel/time 子域都是灰云直连模式,保持一致。
+> 为什么灰云:同步要精准掌控 CORS/OPTIONS,Cloudflare 代理可能干扰自定义响应头;且现有 kegel/time 子域都是灰云直连模式,保持一致。
+> **注意**:1Panel 申请证书(HTTP-01)时需要 80 端口能被 Let's Encrypt 访问,灰云直连正好满足;若用橙云代理会挡住验证。
 
 ---
 
-## 阶段 2:部署代码(甲骨文,约 10 分钟)
+## 阶段 2:部署后端到宿主机 systemd(约 10 分钟)
 
 ```bash
-# 从你本机把 sync-server 推到甲骨文(或用 scp/git clone 同步仓库)
+# 1. 建目录 + 拷代码(注意:先 mkdir 再 cp,否则 cp 报 "Not a directory")
 sudo mkdir -p /opt/sync-server/data
+sudo cp ~/tigang-companion/sync-server/server.mjs /opt/sync-server/
 
-# 方式 A:如果你在甲骨文上 git clone 了项目仓库
-sudo cp <repo>/sync-server/server.mjs /opt/sync-server/
-sudo cp <repo>/sync-server/sync.service /etc/systemd/system/
+# 2. 装 systemd unit(装到 /etc/systemd/system/,不是 /opt/sync-server/)
+sudo cp ~/tigang-companion/sync-server/sync.service /etc/systemd/system/
 
-# 方式 B:scp 单文件
-scp sync-server/server.mjs user@<IP>:/tmp/
-sudo mv /tmp/server.mjs /opt/sync-server/
-```
+# 3. 改 unit:User/Group 要与实际用户一致(本机 drbsops),node 路径用 which node 确认
+which node                                   # 记下绝对路径
+sudo nano /etc/systemd/system/sync.service    # 改 User=drbsops / Group=drbsops / ExecStart 的 node 路径
+cat /etc/systemd/system/sync.service          # ← 查看已装的 unit 就是这个路径
 
-### 3. 配置 systemd(看 sync.service 是否需要调整)
+# 4. data/ 属主给运行用户(SQLite 要可写)
+sudo chown -R drbsops:drbsops /opt/sync-server
 
-```bash
-cat /opt/sync-server/sync.service   # 检查 User / ExecStart 的 node 路径
-# 若 node 装在一个特殊路径(如 nvm),改 ExecStart 指向绝对路径,例如:
-# ExecStart=/root/.nvm/versions/node/v24.x.x/bin/node /opt/sync-server/server.mjs
+# 5. 起服务
 sudo systemctl daemon-reload
 sudo systemctl enable --now sync
-journalctl -u sync -f          # 看日志,应无报错
-curl -s http://127.0.0.1:8787/health   # 应返回 {"ok":true}
+systemctl status sync --no-pager              # 应 active (running)
+journalctl -u sync -n 30 --no-pager           # 看有无报错
+curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
 ```
 
-### 4. 配置 SQLite 备份(必做,见 sync-server/README)
+> **踩过的坑**:`cp x /opt/sync-server/` 在目录不存在时报 `cannot create regular file ... Not a directory` —— 先 `mkdir -p`。
+> `sync.service` 装的位置是 `/etc/systemd/system/sync.service`,**不在** `/opt/sync-server/` 下。
 
-```bash
-# /etc/cron.daily/sync-backup,chmod +x
-DB=/opt/sync-server/data/sync.db
-BK=/opt/sync-server/data/backup
-mkdir -p "$BK"
-sqlite3 "$DB" ".backup '$BK/sync-$(date +\%F).db'"
-find "$BK" -name 'sync-*.db' -mtime +7 -delete
+### 备份:靠现有 DRBS/restic,不再单独配 cron
+
+这台机器已有 DRBS(restic 增量加密 → Cloudflare R2),备份路径含 `/opt`,所以 `/opt/sync-server/data/sync.db` **会被兜底备份**。按 `server-ops-oracle-always-free` 仓库的规矩(新服务应声明精确路径),在该仓库补一行:
+
+```yaml
+# ansible/roles/drbs_base/defaults/main.yml → drbs_restic_backup_paths 下加:
+  - /opt/sync-server/data
 ```
+然后在 WSL 控制端 `./drbs.sh bootstrap` 同步配置、`./drbs.sh backup-start` 验证一次。
+
+> 原 `sync-server/README.md` 里那套 `cron.daily` + `sqlite3 .backup` 方案是给"裸 VPS 无备份体系"写的,**这台机器不需要**(restic 已覆盖)。若想要额外的一致性快照再另说。
 
 ---
 
-## 阶段 3:nginx + 证书(甲骨文,约 5 分钟)
+## 阶段 3:1Panel 反向代理 + 证书(面板操作,约 5 分钟)
 
-1. 把 `sync-server/nginx.conf.example` 里的 **server 块**加进现有 nginx 配置(不动其它 server 块)。
-2. 在 `http { }` 顶层加 `limit_req_zone $binary_remote_addr zone=sync:10m rate=20r/m;`。
-3. 签证书(给新域名单独签,不碰现有):
+这台机器**没有原生 nginx**,反代是 Docker 里的 OpenResty,全部在 1Panel 面板做。`sync-server/nginx.conf.example` **仅作参考,本机不用**。
+
+1. **确认 docker0 网关**(容器访问宿主机的地址):
    ```bash
-   sudo certbot --nginx -d sync.eigentime.org
+   ip addr show docker0 | grep 'inet '     # 通常 172.17.0.1
    ```
-   certbot 会自动改 nginx 配置指到新证书。若已装过 certbot,直接这条即可。
-4. 测试 + 重载:
+2. **1Panel → 网站 → 创建网站 → 反向代理**:
+   - 主域名:`sync.eigentime.org`
+   - 代理地址:`http://172.17.0.1:8787`(**不能填 `127.0.0.1`**——那是 OpenResty 容器自己)
+3. **证书**:1Panel → 网站 → 该站点 → HTTPS → 申请证书(Let's Encrypt,面板自动续期)。**不用 certbot**。
+4. **CORS 头**:后端 `server.mjs` 已在每个响应里自带 CORS(`Access-Control-Allow-Origin: *` + `GET,PUT,OPTIONS` + OPTIONS 短路 204),**面板侧无需再加**。若面板反代吞了头,再在站点的「配置文件」里补 `add_header ... always;`。
+5. **验证**:
    ```bash
-   sudo nginx -t && sudo systemctl reload nginx
+   curl -s https://sync.eigentime.org/health     # 应返回 {"ok":true}
    ```
 5. 验证:
    ```bash

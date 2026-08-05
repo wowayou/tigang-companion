@@ -27,7 +27,19 @@ PUT/GET 覆盖式存储加密 blob,后端**永不解密、不解析内容、不�
 ## SQLite 文件
 
 - 默认 `sync-server/data/sync.db`(可由环境变量 `DB_PATH` 覆盖),单表 `blobs(user_id, blob, updated_at, put_count)`。
-- **备份建议**:整个 `data/` 目录定时打包(如 cron `tar czf`),或停机时直接复制该文件(SQLite 单文件,拷贝即备份)。恢复=把文件放回去重启。
+- **备份(必做)**:文件损坏/误删 = 全部用户远端密文丢失(端到端加密保住本地数据不丢,但全员同步状态被重置)。SQLite 单文件,拷贝即备份。最低限度配一个 cron,每天一次热备 + 滚动保留 7 份:
+  ```bash
+  # /etc/cron.daily/sync-backup  (chmod +x)
+  DB=/opt/sync-server/data/sync.db
+  BK=/opt/sync-server/data/backup
+  mkdir -p "$BK"
+  # .backup 是 SQLite 在线热备,不停服、不锁写(比直接 cp 更安全,cp 可能截到半写状态)
+  sqlite3 "$DB" ".backup '$BK/sync-$(date +\%F).db'"
+  # 删 7 天前的
+  find "$BK" -name 'sync-*.db' -mtime +7 -delete
+  ```
+  注:需机器上有 `sqlite3` CLI;若用 `node:sqlite` 在线后备,可写个一行 node 脚本调 `db.backup()`(Node 22+ 支持)替代 `sqlite3` 命令。直接 `cp` 在写入瞬间拷贝**有风险**(SQLite 官方不建议 cp 活文件),优先用 `.backup`/`db.backup()`。
+- 恢复 = 把备份文件放回 `DB_PATH` 重启 `sync` 服务。
 
 ## 环境变量
 

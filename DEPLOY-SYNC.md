@@ -26,7 +26,19 @@
 
 - [ ] 甲骨文凤凰城 always-free 实例已开机,SSH 能进(用户 `drbsops`)。
 - [ ] 1Panel 面板能登录(反代与证书都在面板里做)。
-- [ ] Node ≥ 22:`node --version`;记下 `which node` 的绝对路径(填进 sync.service)。
+- [ ] Node ≥ 22:`node --version`。⚠️ **本机系统 node 是 v20.20.2(NodeSource),没有 `node:sqlite`**——那是 Node 22 才加的内置模块(带 flag)、24 才稳定。v20 上启动会 `ERR_UNKNOWN_BUILTIN_MODULE: No such built-in module: node:sqlite`,**加 `--experimental-sqlite` 也救不了**。
+  解法(2026-08-07 实测通过):**装一份隔离的 Node 24 专供同步服务**,不动系统 node(这台机器有 9 个 Docker 内的 node 进程:yarn/nodepassdash/RSSHub 等,升级系统 node 有连带风险):
+  ```bash
+  uname -m                      # 甲骨文 A1 = aarch64
+  cd /tmp
+  curl -fsSLO https://nodejs.org/dist/v24.10.0/node-v24.10.0-linux-arm64.tar.xz
+  sudo mkdir -p /opt/node24
+  sudo tar -xJf node-v24.10.0-linux-arm64.tar.xz -C /opt/node24 --strip-components=1
+  /opt/node24/bin/node --version          # v24.10.0
+  # 让 sync.service 指向它
+  sudo sed -i 's|ExecStart=/usr/bin/node|ExecStart=/opt/node24/bin/node|' /etc/systemd/system/sync.service
+  ```
+  代价:这份 runtime 的安全更新要自己管(单一小众后端,可接受)。启动日志会有 `ExperimentalWarning: SQLite is an experimental feature`——**正常,不影响功能**。
 - [ ] 手头能登录 Cloudflare DNS 控制台(eigentime.org 域名)。
 - [ ] 确认 docker0 网关地址:`ip addr show docker0 | grep inet`(通常 `172.17.0.1`)。
 

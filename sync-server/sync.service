@@ -26,9 +26,12 @@ Type=simple
 User=drbsops
 Group=drbsops
 WorkingDirectory=/opt/sync-server
-# node 路径用 `which node` 确认;nvm 装的通常在 ~/.nvm/versions/node/vXX/bin/node
+# node 必须 ≥ 22(node:sqlite 是 22 才有的内置模块,24 起稳定)。
+# ⚠️ Node 20 会报 ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite,加 --experimental-sqlite 也无效。
+#   系统 node 是 20 时,装一份隔离的 Node 24 专供本服务(不动系统 node,详见 DEPLOY-SYNC.md 阶段 0):
+#   ExecStart=/opt/node24/bin/node /opt/sync-server/server.mjs
 # Node 22 用:ExecStart=/usr/bin/node --experimental-sqlite /opt/sync-server/server.mjs
-ExecStart=/usr/bin/node /opt/sync-server/server.mjs
+ExecStart=/opt/node24/bin/node /opt/sync-server/server.mjs
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production

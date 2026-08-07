@@ -9,7 +9,7 @@
 #      查看已安装的 unit:cat /etc/systemd/system/sync.service
 #   4. sudo systemctl daemon-reload && sudo systemctl enable --now sync
 #   5. 看日志:journalctl -u sync -f
-#   6. 验证:curl -s http://127.0.0.1:8787/health   → {"ok":true}
+#   6. 验证:curl -s http://172.17.0.1:8787/health   → {"ok":true}
 #
 # Node 版本:24 实测无需 flag;若用 Node 22,ExecStart 需加 --experimental-sqlite。
 # 反代:本机是 1Panel + Docker OpenResty(无原生 nginx),在 1Panel 面板加反向代理,
@@ -18,7 +18,8 @@
 
 [Unit]
 Description=KegelMate sync server (E2E-encrypted blob store, zero-dependency)
-After=network.target
+Wants=network-online.target
+After=network-online.target docker.service
 
 [Service]
 Type=simple
@@ -35,6 +36,9 @@ ExecStart=/opt/node24/bin/node /opt/sync-server/server.mjs
 Restart=always
 RestartSec=3
 Environment=NODE_ENV=production
+# 1Panel OpenResty 在 Docker bridge 内,必须监听宿主 docker0 网关;默认 127.0.0.1 对容器不可达。
+# 若本机 docker0 不是 172.17.0.1,部署前按 `ip -4 addr show docker0` 的结果修改。
+Environment=HOST=172.17.0.1
 # data/ 要可写(SQLite),属主须是上面的 User
 ReadWritePaths=/opt/sync-server/data
 

@@ -1,6 +1,6 @@
 /* 提肛陪伴 — Service Worker(离线优先,零依赖) */
 
-const CACHE_NAME = 'tigang-v16';
+const CACHE_NAME = 'tigang-v17';
 
 const PRECACHE_URLS = [
   './',
@@ -8,6 +8,7 @@ const PRECACHE_URLS = [
   './styles.css',
   './app.js',
   './sync/client.mjs',
+  './sync/coordinator.mjs',
   './core/engine.js',
   './core/stats.js',
   './core/storage.js',

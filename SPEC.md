@@ -1,7 +1,7 @@
 # 提肛陪伴 (tigang-companion) — 实现规格
 
 一个提肛(凯格尔/盆底肌)训练陪伴 PWA:引导节奏动画 + 打卡统计 + 健康知识。
-零依赖、无构建步骤、无后端,数据全部存本地 localStorage。
+零依赖、无打包构建;训练数据以本地 localStorage 为主,可选端到端加密同步后端只存密文。
 
 本规格是实现的唯一依据,**函数签名、状态字段名、DOM id 必须与本文完全一致**(UI 与核心逻辑由不同 agent 并行实现,契约不一致会导致集成失败)。
 
@@ -31,7 +31,8 @@ tigang-companion/
 │   ├── index.html
 │   └── styles.css
 ├── sync/
-│   └── client.mjs        # 同步浏览器客户端(零依赖,origin 参数化,可复用/可迁移)
+│   ├── client.mjs        # 同步浏览器客户端(零依赖,origin 参数化,可复用/可迁移)
+│   └── coordinator.mjs   # 安全编排器:generation、取消、pull→merge→push、限流重试
 ├── sync-server/          # 自建同步后端(端到端加密,只存密文;部署/端点/限流见 sync-server/README.md)
 │   ├── server.mjs        # Node 单文件:node:http + node:sqlite,零 npm
 │   ├── nginx.conf.example
@@ -48,7 +49,10 @@ tigang-companion/
     ├── stats.test.mjs
     ├── storage.test.mjs
     ├── achievements.test.mjs
-    └── sync.test.mjs
+    ├── contracts.test.mjs
+    ├── sync.test.mjs
+    ├── sync-client.test.mjs
+    └── sync-coordinator.test.mjs
 ```
 
 新增文件须同步本清单 + sw.js 预缓存清单 + 升级 `CACHE_NAME`,否则用户拿不到更新。
@@ -57,7 +61,7 @@ tigang-companion/
 - 禁止任何 npm 依赖、CDN 引用、构建工具;只用浏览器/Node 原生能力。
 - 所有 JS 是 ES module;项目根目录裸 `node --test` 必须全绿(Node ≥ 24 不再接受 `node --test tests/` 目录参数,会伪装成 1 个失败,见 §11)。
 - 禁止 HTML 内联事件(`onclick=`);全部 `addEventListener`。
-- core/ 四个模块不得访问 DOM、`Date.now()`、`localStorage`(时间与存储对象一律由调用方传入),保证可测。
+- core/ 五个模块不得访问 DOM、`Date.now()`、`localStorage`(时间与存储对象一律由调用方传入),保证可测。
 - 中文 UI 文案以本规格给出的为准。
 
 ## §2 训练方案(产品依据)
@@ -272,17 +276,19 @@ export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
   - `normalizeUserId(raw)` → `{ok:true, userId} | {ok:false, error}`——校验并规范化手填的同步 ID;去首尾空白、统一小写,**只接受 UUID v4**(后端也做同样校验,最终防线)。
   - crypto 一律参数注入(默认 `globalThis.crypto`);core 不碰 DOM / `Date.now()` / `localStorage`。
 - **记录 schema**:record 可带可选 `ts`(毫秒时间戳,`app.js writeRecord` 注入 `Date.now()`);旧记录无 ts 视为 0,向后兼容。
-- **浏览器客户端**(`sync/client.mjs`):`syncPull/syncPush/syncProbe`,origin 参数化,AbortController 10s 超时,任何失败 `{ok:false,error}` 不抛;CORS 失败与断网统一 `'network'`。
-- **userId 独立 key + 多设备链接(手填,非自动派生)**:`newUserId()` 生成随机 UUID v4,存 localStorage 独立 key `tigang_sync_user`(不进 settings/exportJSON)。**为什么不从主密码自动派生**(审计结论,2026-08-07):派生方案下两个不同用户用相同主密码(如 `1234`)会算出一模一样的 userId → 撞型同一个桶 → 互相覆盖密文、云端数据反复被摧毁、受害者持续看到「解密失败」→ 比"不同设备同步不到一起"更严重。因此**多设备指向同一个桶靠用户手工操作**:设备 A 的同步 ID 显示在 `#opt-sync-user`(只读),点「复制」按钮(`#btn-sync-copy`)复制 → 设备 B 粘贴到 `#opt-sync-link` 里点「应用」(`#btn-sync-link`)→ `normalizeUserId` 校验 UUID 格式 → 写入本机 localStorage 覆盖 `tigang_sync_user` → 两设备同一 userId → 同一个后端桶。复制降级:clipboard API 失败→选中文本让用户手动 Ctrl+C 并提示。userId 不是密码,但 UI 诚实注明"别公开(别人拿到能覆盖你的密文,虽然解不开)"。
-- **解密失败 → 锁死一切推送**(审计发现 1,2026-08-07):`syncDecryptFailed` 模块标志,`doSyncPull` 解密失败→置 true→**禁止 doSyncPush(含 syncNow 和自动推 scheduleSyncPush)**——否则本机会用错误主密码加密的密文覆盖云端那份额正确加密的有效数据,两边都坏。主密码变更(input)→清除该标志(允许重试)。正确主密码再次 pull → 解密成功 → 置 false(恢复推送)。
+- **浏览器客户端**(`sync/client.mjs`):`syncPull/syncPush/syncProbe`,origin 参数化,AbortController 10s 超时 + 外部 signal 取消,GET 强制 `cache:'no-store'`;任何失败 `{ok:false,error}` 不抛,CORS 失败与断网统一 `'network'`。
+- **同步编排器**(`sync/coordinator.mjs`):所有手动、打开应用、`persist()` 防抖、限流重试都走同一条 **pull → decrypt/merge → snapshot/encrypt → push** 流水线。三条硬不变量:① 任意 PUT 必须紧跟同一身份上下文的一次成功 GET 或明确 `none`;拉取网络/HTTP/解析失败一律中止,不 PUT;② userId/主密码/启用状态变化时 generation++、清 debounce/retry timer、abort 在途 fetch,旧异步结果不得合并/更新 UI;③ userId/passphrase 在流水线启动时快照,任何 `await` 之后不读取可变全局身份。同步中又发生本地变化→当前轮结束后自动再跑一轮,不会吞更新。
+- **userId 独立 key + 多设备链接(手填,非自动派生)**:`newUserId()` 生成随机 UUID v4,存 localStorage 独立 key `tigang_sync_user`(不进 settings/exportJSON)。**为什么不从主密码自动派生**(审计结论,2026-08-07):派生方案下两个不同用户用相同主密码(如 `1234`)会算出一模一样的 userId → 撞进同一个桶 → 互相覆盖密文。因此多设备靠用户手工复制 ID。开启同步时 ID **立即生成并显示**,无需先同步/重开弹窗;应用其它设备 ID 会先取消全部旧任务,新身份必须重新 pull。安全口径:userId 是高熵寻址/写入凭据,**不是可公开的普通编号**;泄露者可读取并覆盖密文,且弱主密码仍可能被离线猜解,所以 ID 与主密码都要保密并分开传递。
+- **解密或拉取失败 → 绝不推送**:解密失败会锁住自动同步,UI 显示「主密码不符,未上传」;只有主密码/userId 变化后重新执行完整 pull 才能恢复。拉取失败同样直接结束当前流水线,不能把未合并的本地快照写回远端。限流重试也必须重新 pull,禁止重放几秒前的旧 PUT。
 - **主密码缓存策略(会话级,2026-08-05 优化)**:主密码不进 localStorage / settings / exportJSON,只进内存 + `sessionStorage`(键 `tigang_sync_pass`,输入即写)。**sessionStorage 生命周期=tab 会话**:同一 tab 内刷新不丢,关 tab 丢;PWA 从主屏图标启动有时算新会话也丢——属可接受降级,丢=回到「进设置输一次」的老流程,不崩。**用户主动改主密码→覆盖写新值;关闭同步→清空**。忘了主密码=远端密文不可恢复,**本地数据不丢**,重输=重新开始同步。权衡(同源 XSS 可读,与 userId 明文同风险等级)见 DEVELOPMENT.md D31。
-- **同步时机**(无新定时器):
-  - 打开应用:若 `sync.enabled && 主密码可用(本会话输入或 sessionStorage 回填)` → 后台 pull → decrypt → merge(只合记录,设置保留本机)→ save → renderStats;任一步失败静默降级纯本地。
-  - 首次启用引导:勾「启用同步」自动展开主密码组并聚焦;`doSyncPull` 收到远端 `none`(无数据)记 `syncRemoteEmpty` 标志,`syncNow` 据此**跳过 pull 直接推**(首次纯 push);首次推送成功状态显示「已开启同步 · 本机数据已上传」。
-  - `persist()` 后:debounce 2s,若启用且有主密码且在线 → encrypt → push;失败静默,下次打开重试。
+- **同步时机**:
+  - 打开应用:若 `sync.enabled && 主密码可用(本会话输入或 sessionStorage 回填)` → 完整安全流水线;任一步失败降级纯本地。
+  - 首次启用:勾开关后立即生成/显示 ID并聚焦主密码;点同步后先 GET,明确 `none` 才上传本机数据。
+  - `persist()` 后:debounce 2s → 完整安全流水线,**不是直接 push**。
+  - PUT 429:4.5s 后重新执行完整流水线一次;仍 429 才提示稍后再试。
   - 离线(`!navigator.onLine`)跳过。
-- **UI**(设置弹窗一组,新增/更新 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#opt-sync-user`(本机同步 ID,只读) `#btn-sync-copy`(复制同步 ID) `#opt-sync-link`(粘贴另一台设备的同步 ID) `#btn-sync-link`(应用链接 ID) `#btn-sync-now` `#sync-last` `#sync-state`;`.input-with-copy` 行(输入框 flex:1 + 按钮固定不换行);主密码/按钮/状态行包在无 id 的 `.sync-setup` 容器内,**开关关时 `hidden` 收起整组**;状态行按 `sync-ok`(成功绿)/`sync-err`(失败橙)/`sync-busy`(进行中灰)着色。
-- **正确性说明**:**不同主密码 → 解密失败 → 静默降级本地、UI 显示「解密失败」** 是端到端加密的正确表现,不是 bug;离线打开纯本地不报错。
+- **UI**(设置弹窗一组,新增/更新 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#opt-sync-user`(本机同步 ID,只读) `#btn-sync-copy`(复制同步 ID) `#opt-sync-link`(粘贴另一台设备的同步 ID) `#btn-sync-link`(应用链接 ID) `#btn-sync-now` `#sync-last` `#sync-state`;`.input-with-copy` 行(输入框 flex:1 + 按钮固定不换行);同步中禁用「立即同步/应用 ID」防重复操作,但底层 generation 防线仍必须成立;状态行按 `sync-ok`/`sync-err`/`sync-busy` 着色。
+- **正确性说明**:**不同主密码 → 解密失败 → 本地不受影响且无 PUT** 是端到端加密的正确表现,不是 bug;离线打开纯本地不报错。
 
 ## §7 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
 
@@ -312,6 +318,12 @@ storage.test.mjs 至少覆盖:空存储→默认值、损坏 JSON→默认值、
 achievements.test.mjs 至少覆盖:computeMetrics 各字段正确性、evaluate 的 badges/next/nextByMetric、unlockedIds、newlyUnlocked(前后快照对比)、dailyGoal 达标/未达标、bestStreak 断档后徽章不被收回。
 
 sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → {ok:false} 不抛、损坏 blob(ct 改一字节)→ {ok:false} 不抛、非法/垃圾 blob → {ok:false}、旧记录无 ts + 新记录有 ts 混合不丢、同 dateStr 不同指纹 → LWW + conflicts 正确、同 dateStr 都无 ts / 平 ts → 留 remote、同指纹 → 不叠加 conflicts=0、合并稳定(打乱顺序 merged 一致)、null/非法入参不抛、newUserId 合法 UUID v4 格式。
+
+sync-client.test.mjs 至少覆盖:GET `cache:no-store`、外部 AbortSignal 可取消、`none`/429/413 错误语义。
+
+sync-coordinator.test.mjs 至少覆盖:拉取失败不 PUT、解密失败锁住自动同步、ID/密码切换让旧 pull/encrypt/timer 失效、防抖执行完整流水线、限流重试重新 GET、同步中本地再变化会 rerun、上传使用深快照。
+
+contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖图全部进入 Service Worker 预缓存、响应式圆尺寸方向、systemd/docker0 部署地址一致。
 
 ## §8 UI 规格(index.html + styles.css + app.js)
 
@@ -371,7 +383,7 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 - **徽章墙**:卡片标题旁 `#badge-count`(`{unlockedCount} / {total}`,即 `x / 12`),`#badge-wall`(4 列 × 3 行网格,每枚徽章显示图标+名称,未解锁降低透明度,title 属性显示描述与差距),下方 `#next-badge`(离下一枚还差多少,如 `⚡ 距「一周不断」还差 2 天`;全部解锁则显示完结文案);
 - 四格指标:`#stat-days` 累计打卡天数(activeDays)、`#stat-sessions` 完成训练次数(finishedSessions)、`#stat-reps` 累计收缩次数、`#stat-duration` 累计时长(分钟,四舍五入);
 - `#heatmap`:`lastNDays(records, today, 35)` 渲染 7列×5行 grid,旧→新,按 finishedCount 0/1/2/≥3 四档由浅到深上色,最后一格(今天)加描边;
-- `#btn-export` 导出:`exportJSON` 生成 Blob 下载,文件名 `tigang-data.json`;`#btn-clear` 清除全部数据(confirm 二次确认)。
+- `#btn-export` 导出:`exportJSON` 生成 Blob 下载,文件名 `tigang-data.json`;`#btn-clear` 清除本机记录/设置/session 主密码/本机同步 ID,先 invalidate 所有同步任务再删存储。服务器既有密文不会自动删除,确认文案必须诚实说明。
 
 ### 知识 tab(静态内容,文案照抄,允许微调排版)
 
@@ -455,7 +467,7 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v11'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index.html/styles.css/app.js/manifest/sw.js + core/ 四个模块 + 4 个 icon PNG,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
+- sw.js:`CACHE_NAME='tigang-v17'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index/styles/app/manifest/sw + core/ 五个模块 + `sync/client.mjs` + `sync/coordinator.mjs` + 图标,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
 - app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
 
 ## §10 验收清单(由主会话执行)
@@ -513,5 +525,9 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 17. **同步体验优化(主密码会话级缓存 + 首次引导 + UI 简化,默认仍可选取舍不变)**:主密码从「纯内存态」改为「内存 + `sessionStorage`(键 `tigang_sync_pass`,输入即写)」——tab 内刷新不丢、关 tab 丢,PWA 新会话丢=降级重输不崩;不进 localStorage/settings/exportJSON。首次启用引导:勾选自动展开主密码组并聚焦,远端确认无数据(`none`)后 `syncNow` 跳过 pull 直接推,首次推送成功提示「已开启同步 · 本机数据已上传」。UI:主密码/按钮/状态行包进 `.sync-setup`(无新 id)开关关时 `hidden` 收起;状态行按 `sync-ok`(绿)/`sync-err`(橙)/`sync-busy`(灰)着色。**core/sync.js 零改、后端/限流/合并逻辑零动**。契约见 §6.z,权衡见 DEVELOPMENT.md D31。
 
 18. **同步安全审计修复(审计发现 1-3,2026-08-07,commit 见 D33)**:审计发现三项——① 🔴**解密失败后无条件推送会覆盖云端正确密文**(`syncNow` 先 pull 后 push,解密失败时 doSyncPull return 但 doSyncPush 照样执行)→加 `syncDecryptFailed` 门闸锁死一切 push,主密码变更清除,正确密码重新拉成功恢复;② userId 随机生成→两台设备不同桶永远同步不到一起→改为**手填同步 ID**(`normalizeUserId` 纯函数 + `#opt-sync-user`/`#btn-sync-copy`/`#opt-sync-link`/`#btn-sync-link` UI + 后端 UUID 格式校验),不选从主密码派生(两个用户用相同弱密码会撞桶互相摧毁云端数据);③ 后端限流间隔 10s→3s + 客户端 `rate` 时自动延后重试一次(多设备共用同一 userId 共享额度);后端加 UUID_RE 双向校验预防手填误入。**core/sync.js 加 `normalizeUserId`,其余全在 app.js / server.mjs / UI。** 完整审计与撞桶论证见 DEVELOPMENT.md D33。
+
+再一轮修订(`CACHE_NAME` → `tigang-v17`):
+
+19. **同步编排彻底修复(2026-08-07)**:验收发现 D33 的布尔门闸仍不足——拉取网络失败后仍会 push、切换 ID/密码时旧 debounce/retry/in-flight 任务可能串桶、自动同步是盲 push、首次 ID 不即时显示。新增 `sync/coordinator.mjs`:用 generation + AbortController + 身份快照统一手动/打开/自动/重试四条路径;任何 PUT 前都必须同上下文 GET 成功或明确 none;429 重试重新 GET;同步中本地再变化会 rerun。`sync/client.mjs` 加外部 signal + no-store;设置开关即时生成 ID;同步中禁重复按钮。新增 coordinator/client 竞态测试。同步修正 systemd docker0 监听、后端 no-store/UUID 小写、圆尺寸断点与部署验收文档。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

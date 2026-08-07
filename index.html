@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0f9b8e">
-  <meta name="description" content="提肛(凯格尔/盆底肌)训练陪伴:节奏引导动画、打卡统计与健康知识。数据只存本地。">
+  <meta name="description" content="提肛(凯格尔/盆底肌)训练陪伴:节奏引导动画、打卡统计与健康知识。默认本地存储,可选端到端加密同步。">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="提肛陪伴">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -206,7 +206,7 @@
 
         <div class="card">
           <h2 class="card-title">数据管理</h2>
-          <p class="hint">所有数据只保存在本机浏览器,不会上传。换手机/清缓存前记得先导出备份。</p>
+          <p class="hint">数据默认只保存在本机浏览器;只有主动开启同步时才会上传端到端加密密文。换手机/清缓存前记得先导出备份。</p>
           <div class="row-btns">
             <button type="button" class="btn btn-ghost" id="btn-export">导出备份</button>
             <button type="button" class="btn btn-ghost" id="btn-import">导入备份</button>
@@ -333,30 +333,30 @@
           <input type="password" id="opt-sync-master" class="text-input" placeholder="设一个主密码(加密钥匙,忘记则远端数据不可恢复)" autocomplete="new-password">
         </label>
 
-        <label class="opt-col">
-          <span class="opt-text">本机同步 ID(不可猜,但也别公开)</span>
+        <div class="opt-col">
+          <label class="opt-text" for="opt-sync-user">本机同步 ID(不可猜,但也别公开)</label>
           <div class="input-with-copy">
-            <input type="text" id="opt-sync-user" class="text-input" readonly placeholder="关闭并重新开启同步后会自动生成">
+            <input type="text" id="opt-sync-user" class="text-input" readonly placeholder="开启同步后自动生成">
             <button type="button" class="btn btn-ghost copy-btn" id="btn-sync-copy" title="复制同步 ID">复制</button>
           </div>
-        </label>
+        </div>
 
-        <label class="opt-col">
-          <span class="opt-text">用其它设备的同步 ID(填入后会覆盖本机 ID)</span>
+        <div class="opt-col">
+          <label class="opt-text" for="opt-sync-link">用其它设备的同步 ID(填入后会覆盖本机 ID)</label>
           <div class="input-with-copy">
             <input type="text" id="opt-sync-link" class="text-input" placeholder="粘贴另一台设备的同步 ID" autocomplete="off">
             <button type="button" class="btn btn-primary link-btn" id="btn-sync-link">应用</button>
           </div>
-        </label>
+        </div>
 
         <div class="opt-actions">
           <button type="button" class="btn btn-primary" id="btn-sync-now">立即同步</button>
         </div>
 
-        <p class="hint">上次同步:<span id="sync-last">—</span> · 状态:<span id="sync-state">—</span></p>
+        <p class="hint">上次同步:<span id="sync-last">—</span> · 状态:<span id="sync-state" role="status" aria-live="polite">—</span></p>
       </div>
 
-      <p class="hint">端到端加密 · 数据只存自建服务器 · 不想用随时关掉</p>
+      <p class="hint">端到端加密 · 同步 ID 与主密码都要保密(ID 泄露可读取/覆盖密文,弱密码仍可能被离线猜解)</p>
     </div>
 
     <p class="hint">不开语音也能不看屏幕:收紧是上行音、维持是双平音、放松是下行音。语音开启后会通过扬声器外放,公共场合留意。</p>

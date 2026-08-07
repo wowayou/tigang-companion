@@ -3,7 +3,8 @@
  *
  * 零 npm 依赖:node:http + node:sqlite(Node 22+ 内置;24 实测无需 flag)。
  * 只存取密文 blob,永不解密、不解析内容、不收主密码 —— 主密码绝不离开设备。
- * 由 nginx 反代 443 → 127.0.0.1:8787(CORS 全在 nginx 加,见 nginx.conf.example)。
+ * 默认只监听 127.0.0.1;实际 1Panel/Docker 部署由 systemd 显式绑定 docker0 网关。
+ * CORS 与 no-store 由后端直接返回,反代层无需重复维护。
  *
  * 端点:
  *   OPTIONS *           preflight 短路 204 + CORS
@@ -14,7 +15,7 @@
  * 冲突处理:后端不处理,last-write-wins 覆盖;合并由客户端做(拉→解密→mergeForSync→加密→推)。
  *
  * 限流(持久存储必须防滥用):
- *   · 同 userId PUT > 1 次/10s → 429 {ok:false,error:'rate'}(用 updated_at 判)
+ *   · 同 userId PUT > 1 次/3s → 429 {ok:false,error:'rate'}(用 updated_at 判)
  *   · 单 IP 全部端点 > 20 次/分 → 429(内存 Map + 时间窗,进程重启清零可接受;单机够用)
  *   nginx 层另配 limit_req 兜底(见 nginx.conf.example)。
  *
@@ -65,8 +66,8 @@ db.exec(`
 const ipHits = new Map(); // ip -> number[](窗口内时间戳)
 
 function clientIp(req) {
-  // 只监听回环:直接对端永远是 nginx 或本地测试。nginx 用 proxy_set_header
-  // X-Forwarded-For $remote_addr; 覆写,后端拿到的就是真实客户端 IP。
+  // 生产只监听宿主 docker0 网关:直接对端应为 1Panel OpenResty。反代用
+  // X-Forwarded-For 覆写真实客户端 IP;8787 不得对公网开放。
   const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
   return xff || req.socket.remoteAddress || 'unknown';
 }
@@ -89,6 +90,8 @@ const CORS = {
   'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Max-Age': '86400',
+  'Cache-Control': 'no-store', // 密文与 none 响应都不能被浏览器/中间代理缓存
+  'X-Content-Type-Options': 'nosniff',
 };
 
 function send(res, status, obj) {
@@ -110,7 +113,7 @@ function handleGetSync(res, key) {
 }
 
 function handlePutSync(req, res, key) {
-  // 同 userId 10s 内只允许一次 PUT(用 updated_at 判:成功写入才刷新窗口)
+  // 同 userId 3s 内只允许一次 PUT(用 updated_at 判:成功写入才刷新窗口)
   const row = db.prepare('SELECT updated_at FROM blobs WHERE user_id = ?').get(key);
   const now = Date.now();
   if (row && now - row.updated_at < USER_PUT_INTERVAL_MS) {
@@ -180,10 +183,7 @@ function readBody(req, res, cb) {
 /* ---------------- HTTP 服务 ---------------- */
 
 const server = createServer((req, res) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,PUT,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  res.setHeader('Access-Control-Max-Age', '86400');
+  for (const [name, value] of Object.entries(CORS)) res.setHeader(name, value);
 
   if (req.method === 'OPTIONS') {
     res.writeHead(204);
@@ -206,15 +206,17 @@ const server = createServer((req, res) => {
     return;
   }
   if (path === '/sync') {
-    const key = String(url.searchParams.get('key') || '');
+    const rawKey = String(url.searchParams.get('key') || '');
     // 必须是 UUID:客户端 newUserId() 只生成 UUID v4,后端同样校验,
     // 免得任意字符串都能建桶(如手填时打成 "testuser" 会撞上别人/测试残留的桶)。
     // 客户端也校验,但纯前端校验可绕过,这里是最终防线。
-    if (!UUID_RE.test(key) || key.length > MAX_KEY_LEN) {
+    if (!UUID_RE.test(rawKey) || rawKey.length > MAX_KEY_LEN) {
       console.log(`${new Date().toISOString()} 400 ip=${ip} ${req.method} ${req.url}`);
       send(res, 400, { ok: false, error: 'bad-key' });
       return;
     }
+    // UUID 大小写等价;统一小写,避免 API 直调时同一个 UUID 被拆成两个 SQLite 桶。
+    const key = rawKey.toLowerCase();
     if (req.method === 'GET') {
       handleGetSync(res, key);
       return;

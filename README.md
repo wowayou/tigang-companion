@@ -1,6 +1,6 @@
 # KegelMate · 提肛陪伴 (tigang-companion)
 
-一个提肛(凯格尔/盆底肌)训练陪伴应用:跟着动画节奏收缩/放松,自动打卡、统计连续天数,内置科学训练知识。零依赖 PWA,可安装到手机主屏,完全离线可用,数据只存在你自己的设备上。英文名 **KegelMate**(只改 `site/index.html` 与 manifest 各一行即可换)。
+一个提肛(凯格尔/盆底肌)训练陪伴应用:跟着动画节奏收缩/放松,自动打卡、统计连续天数,内置科学训练知识。零依赖 PWA,可安装到手机主屏,完全离线可用;数据默认只在本机,也可主动开启端到端加密多端同步。英文名 **KegelMate**(只改 `site/index.html` 与 manifest 各一行即可换)。
 
 **在线体验**:<https://kegel.eigentime.org/app/>(手机浏览器打开 → 菜单 → 添加到主屏幕,即可当 App 用)。产品落地页在 <https://kegel.eigentime.org/>。
 
@@ -18,6 +18,7 @@
 - **健康知识**:好处、正确做法、注意与禁忌
 - **每日提醒**:设定时间弹通知(网页限制:仅应用打开时生效)
 - **数据自主**:localStorage 本地存储;导出备份(文件名带时间戳,iOS 走系统分享落盘)/ 导入备份(合并 / 替换两档,按指纹去重)/ 清除
+- **可选加密同步**:主密码不离开设备,服务器只存 AES-GCM 密文;多端通过随机同步 ID 手工关联,所有写入都先拉取合并
 - **可安装**:支持 iOS/Android 添加到主屏幕,自带应用图标,离线可用
 
 ## 运行
@@ -35,7 +36,7 @@ npm run serve        # 即 python3 -m http.server 8080
 npm test             # 即裸 node --test  (需 Node ≥ 20;Node 24 起不要用 node --test tests/ 目录参数)
 ```
 
-78 个用例全绿,覆盖训练状态机(阶段转移含维持段、暂停恢复、跨阶段追帧、不可变性)、打卡统计(连续天数边界、跨月日期算术、历史最长连续)、成就徽章(解锁判定、今日目标)、存储(损坏数据回退、设置合并、旧存档升级、备份解析净化、合并去重)。
+100+ 个用例覆盖训练状态机、打卡统计、成就徽章、存储/备份、端到端加密、同步客户端取消与同步编排竞态。
 
 ## 目录
 
@@ -46,6 +47,10 @@ core/engine.js        训练状态机(纯函数,时间外部注入)
 core/stats.js         打卡/连续天数/热力图数据
 core/storage.js       localStorage 读写 + 备份解析/合并
 core/achievements.js  成就徽章 / 今日目标(纯函数)
+core/sync.js          加密/解密/LWW 合并/UUID
+sync/client.mjs       可取消、no-store 的同步 HTTP 客户端
+sync/coordinator.mjs  身份 generation + pull→merge→push 安全编排
+sync-server/          自建密文后端(systemd + SQLite)
 app.js                UI 胶水层
 tools/build-site.mjs  组装部署目录(根=site/,/app/=sw.js 预缓存清单)
 tools/make-icons.mjs  零依赖 PNG 图标生成脚本

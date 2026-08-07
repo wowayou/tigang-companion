@@ -1,7 +1,7 @@
 # 同步后端部署 + 端到端验收清单
 
 > 一次性操作。做完同步就上线。所有动作都在甲骨文凤凰城实例 + Cloudflare DNS 控制台上,不需要改代码。
-> 代码已全部就绪并验收通过(commit ff25fa4..3b49ac6,后端 `sync-server/`、前端已接线、sw v14)。
+> 当前代码基线:后端 `sync-server/`、安全同步编排器 `sync/coordinator.mjs`、sw v17;发版前以 `main` 最新 CI 为准。
 > 相关文档:`sync-server/README.md`(后端细节)、`SYNC-SPEC.md`(设计)、`SYNC-OPTIMIZE.md`(前端体验)。
 
 ---
@@ -19,8 +19,8 @@
 | 登录用户 | `drbsops`(**不是 `ubuntu`**——`sync.service` 里的 User/Group 要改成 drbsops) |
 | 运维红线 | 该仓库 AGENTS.md:不改 OpenResty/1Panel 配置、不新增监听端口须谨慎、live 操作由操作者本人在面板执行 |
 
-**因此反代方案 = systemd 跑后端在宿主 `127.0.0.1:8787` + 1Panel 面板加反向代理。**
-容器访问宿主机**不能用 `127.0.0.1`**(那是容器自己),要用 docker0 网关 `172.17.0.1`。
+**因此反代方案 = systemd 把后端绑定在宿主 docker0 网关 `172.17.0.1:8787` + 1Panel 面板反代同一地址。**
+容器访问宿主机**不能用 `127.0.0.1`**(那是容器自己);`sync.service` 已显式设置 `HOST=172.17.0.1`,若实机网关不同必须同步修改。
 
 ## 阶段 0:确认前置
 
@@ -40,7 +40,7 @@
   ```
   代价:这份 runtime 的安全更新要自己管(单一小众后端,可接受)。启动日志会有 `ExperimentalWarning: SQLite is an experimental feature`——**正常,不影响功能**。
 - [ ] 手头能登录 Cloudflare DNS 控制台(eigentime.org 域名)。
-- [ ] 确认 docker0 网关地址:`ip addr show docker0 | grep inet`(通常 `172.17.0.1`)。
+- [ ] 确认 docker0 网关地址:`ip -4 addr show docker0`(通常 `172.17.0.1`)。
 
 ---
 
@@ -81,7 +81,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now sync
 systemctl status sync --no-pager              # 应 active (running)
 journalctl -u sync -n 30 --no-pager           # 看有无报错
-curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
+curl -s http://172.17.0.1:8787/health         # 应返回 {"ok":true}
+ss -ltnp | grep ':8787'                       # 应监听 172.17.0.1:8787,不是 0.0.0.0:8787
 ```
 
 > **踩过的坑**:`cp x /opt/sync-server/` 在目录不存在时报 `cannot create regular file ... Not a directory` —— 先 `mkdir -p`。
@@ -113,14 +114,10 @@ curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
    - 主域名:`sync.eigentime.org`
    - 代理地址:`http://172.17.0.1:8787`(**不能填 `127.0.0.1`**——那是 OpenResty 容器自己)
 3. **证书**:1Panel → 网站 → 该站点 → HTTPS → 申请证书(Let's Encrypt,面板自动续期)。**不用 certbot**。
-4. **CORS 头**:后端 `server.mjs` 已在每个响应里自带 CORS(`Access-Control-Allow-Origin: *` + `GET,PUT,OPTIONS` + OPTIONS 短路 204),**面板侧无需再加**。若面板反代吞了头,再在站点的「配置文件」里补 `add_header ... always;`。
+4. **CORS/缓存头**:后端 `server.mjs` 已单一负责 CORS、OPTIONS 与 `Cache-Control:no-store`,**面板侧不要重复加 `Access-Control-Allow-*`**(重复头可能被浏览器判为无效)。
 5. **验证**:
    ```bash
    curl -s https://sync.eigentime.org/health     # 应返回 {"ok":true}
-   ```
-5. 验证:
-   ```bash
-   curl -s https://sync.eigentime.org/health   # 应返回 {"ok":true}
    ```
 
 ---
@@ -138,16 +135,17 @@ curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
   返回 `{ok:true}` 且**无 CORS 报错** → CORS 通。
 
 ### B. 同主密码端到端(核心)
-- [ ] 设备 A:开应用 → 设置 → 勾「启用同步」→ 输主密码 `test123` → 记下「本机同步 ID」→ 点「立即同步」→ 状态「已同步 / 首次同步已上传」。
+- [ ] 设备 A:开应用 → 设置 → 勾「启用同步」→ **同步 ID 应立即出现,无需先同步/重开弹窗** → 输主密码 `test-sync-2026` → 点「立即同步」→ 状态「已同步 / 首次同步已上传」。
 - [ ] 设备 A 点「复制」按钮复制同步 ID,粘贴到设备 B 的「用其它设备的同步 ID」输入框,点「应用」。
-- [ ] 设备 B(无痕):勾启用 → 输**相同**主密码 `test123` → 点「立即同步」。
+- [ ] 设备 B(无痕):勾启用 → 输**相同**主密码 `test-sync-2026` → 点「立即同步」。
 - [ ] B 拉到 A 的记录,无重复,A/B 记录一致。
 - [ ] B 练一次 → 同步 → A 重开/立即同步 → A 看到 B 的新记录。
 
 ### C. 不同主密码(端到端加密证明)
 - [ ] 设备 C:勾启用 → 输**不同**主密码 `wrong` → 立即同步。
-- [ ] 预期:解密失败 → 状态「解密失败(主密码不符或远端数据损坏)」→ **本地数据完好** → 不崩。
-- [ ] 这条通=后端密文用错主密码确实解不开。
+- [ ] 预期:状态「主密码不符,未上传(避免覆盖远端数据)」→ **本地数据完好** → 不崩。
+- [ ] DevTools Network 确认该轮只有 GET,**解密失败后没有 PUT**。
+- [ ] 改回正确主密码后再次同步 → 重新 GET/解密/合并后才 PUT。
 
 ### D. 离线降级
 - [ ] F12 断网 → 打开应用 → 不报错,纯本地可用。
@@ -155,8 +153,8 @@ curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
 - [ ] 恢复网络 → 立即同步 → 正常。
 
 ### E. 限流
-- [ ] 连点「立即同步」触发 10s 内二次 PUT → 「推送过频,稍后再试」(429)。
-- [ ] 等 10s → 再点 → 成功。
+- [ ] 一次同步刚完成后立即再点,3s 窗口内二次 PUT → 「推送过频,稍后将重新拉取并重试…」。
+- [ ] 约 4.5s 后自动恢复为「已同步」;Network 顺序必须是重试 GET → PUT,**不能只重放旧 PUT**。
 
 ### F. 会话级缓存(优化项)
 - [ ] 输主密码 → **刷新 tab** → 主密码仍在 → 自动 pull(sessionStorage 保活)。
@@ -167,7 +165,7 @@ curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
 
 ## 阶段 5:发版收尾
 
-- [ ] 前端 sw.js 已是 `tigang-v14`(优化 commit 升的)。push 后 CI 自动部署 + 跑测试。
+- [ ] 前端 sw.js 已是 `tigang-v17`,且预缓存同时包含 `sync/client.mjs` 与 `sync/coordinator.mjs`。push 后 CI 自动部署 + 跑测试。
 - [ ] 应用发布后,真机(尤其 iPhone Safari)过一遍 B/C 两条(端到端 + 解密失败降级)——iOS 是这功能最该确认的平台。
 
 ---
@@ -177,4 +175,4 @@ curl -s http://127.0.0.1:8787/health          # 应返回 {"ok":true}
 - 同步只在**打开应用时**发生(PWA 无后台同步)。设备 B 得打开一次 app 才拉到 A 的数据。
 - 同一天两次不同内容的训练,合并后**只留最新一条**(LWW,按日粒度,见 D31 限制③)。
 - 主密码忘了 = 远端密文不可恢复(本地数据不丢,重输新主密码重新同步)。
-- 单机房凤凰城,机器挂 = 同步断(本地降级不丢),备份 cron 兜底恢复。
+- 单机房凤凰城,机器挂 = 同步断(本地降级不丢),由现有 DRBS/restic → R2 备份兜底恢复。

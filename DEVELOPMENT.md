@@ -198,18 +198,18 @@
 - **安全诚实评估三段**:
   - **机密性(✅)**:AES-GCM-256 + PBKDF2-SHA256 200000 轮。主密码不离开设备,后端只见密文。**唯一限制**:主密码强度靠用户自己——弱主密码仍可被离线爆破(200000 轮/次抬高成本但不杜绝)。
   - **完整性(✅)**:由 GCM 认证标签保证。后端不解析内容,无法引入数据损坏(除了整体覆盖)。
-  - **可用性(⚠️ 无账号模型的权衡,非设计缺陷)**:无账号=后端 `/sync` 端点公开,任何人知道/猜到 userId 都能 PUT 垃圾密文覆盖。但 userId 是 `crypto.randomUUID()`(122 位熵)猜不到;即便泄露被覆盖,攻击者**没有主密码造不出能被受害者主密码解开的合法密文**→受害者下次 pull→decrypt 失败→**静默降级,本地数据不丢**→用本地数据重推即恢复。最坏=解密失败一次、本地不丢、重推恢复。**这是端到端加密的天然韧性,不是缺陷**。
+  - **可用性/凭据泄露(⚠️ 无账号模型的权衡)**:userId 实际上是高熵的读写寻址凭据。知道它的人既能 GET 密文也能 PUT 垃圾密文覆盖;拿到密文后还可对弱主密码做离线猜解。UUID v4 的 122 位熵使远程枚举不可行,但**一旦泄露不能再声称“只会覆盖、绝对解不开”**。因此 UI 明确要求 ID 与主密码都保密、最好分开传递;本地数据仍是恢复底线。
 - **花费**:现阶段 0(甲骨文 always-free 永久免费,已在用);未来 0 或迁移成本;自建无按量计费,无意外账单。诚实限制:① 单机房无 SLA,机器挂=同步断(降级本地不丢);② 国内延迟 150-250ms(同步非实时,可接受);③ 运维时间成本归用户。
 - **ts schema 向后兼容**:record 可带可选 `ts`(毫秒时间戳,`app.js writeRecord` 注入 `Date.now()`,Date.now 只在胶水层);旧记录无 ts 视为 0,`mergeForSync` 内按缺失=0,旧数据不强制升级。
 - **时区**:dateStr 仍是本地 `YYYY-MM-DD`(D5 防线不变);ts 只作 LWW 辅助(同 dateStr 冲突时取较大者),不含时区语义。跨时区设备在同一天内时差可能让 LWW 略有先后,但不会丢日期维度。
-- **已知限制**:① PWA 不后台同步——只在打开应用时同步;② 同 dateStr 同内容(撞指纹)去重;③ **同一天多次不同内容的训练按「日」合并,LWW 只留 ts 最大的一条**(按日粒度的刻意简化;要按「次」保留需给记录加唯一 id,属设计变更);④ 主密码丢失=远端密文不可恢复(本地不丢);⑤ 限流 1 次/10s per userId + 20 次/分 per IP;⑥ 单机房凤凰城,机器挂=同步断(降级本地不丢);⑦ 迁移性:client.mjs 抽象了 origin,未来可换 Worker 后端,端到端加密不变;⑧ **服务端 SQLite 文件无内建备份**——文件损坏/误删 = 全部用户远端密文丢失(因端到端加密,用户本地数据不丢,下次同步重推即恢复,但中短期内全员同步状态被重置)。部署侧必须配 cron 备份(见 sync-server/README.md)。
+- **已知限制**:① PWA 不后台同步——只在打开应用时同步;② 同 dateStr 同内容(撞指纹)去重;③ **同一天多次不同内容的训练按「日」合并,LWW 只留 ts 最大的一条**(按日粒度的刻意简化;要按「次」保留需给记录加唯一 id,属设计变更);④ 主密码丢失=远端密文不可恢复(本地不丢);⑤ 限流 1 次/3s per userId + 20 次/分 per IP;⑥ 单机房凤凰城,机器挂=同步断(降级本地不丢);⑦ 迁移性:client.mjs 抽象了 origin,未来可换 Worker 后端,端到端加密不变;⑧ SQLite 自身无跨机房冗余,实际机器由 DRBS/restic → R2 备份 `/opt/sync-server/data`。
 - **app.js 接线 + 主密码缓存策略 + 离线跳过 + userId 独立 key**:
   - `SYNC_ORIGIN`(自建甲骨文)与计数 Worker 的 `COUNTER_ORIGIN` **解耦**——不同址不同服务。
   - **主密码缓存策略(2026-08-05 优化)= sessionStorage 会话级缓存**(键 `tigang_sync_pass`,输入即写):tab 内刷新不丢,**关 tab 丢**;PWA 从主屏图标启动有时算新会话也丢=可接受降级(回到老流程进设置输一次,不崩)。**不进 localStorage、不进 settings/exportJSON**——硬要塞 localStorage 虽能跨会话保主密码,但凭据寿命被拉长到与用户数据同生命周期,破坏隐私基调,拒绝。诚实权衡:**sessionStorage 仍可被同源 XSS 读,与 userId(localStorage 明文)同风险等级**;要再短命只能每次输——选「会话级缓存」是便利/安全的折中。忘了主密码=远端不可恢复、本地不丢,重输=重新开始同步。
-  - 离线(`!navigator.onLine`)跳过;`persist()` 后 debounce 2s 推。
-  - **不同主密码 → 解密失败 → 静默降级本地,UI 显示「解密失败」——这是端到端加密的正确表现,非 bug**。
-  - userId 走独立 key `tigang_sync_user`(明文可接受:泄露只意味着别人可覆盖密文,无主密码解不开,本地可重推恢复),不进 settings/exportJSON。
-- **发版注意(SYNC-SPEC 单元 3 的一处修正)**:app.js import 了新的静态文件 `sync/client.mjs`,它**必须**进 sw.js 预缓存清单并升 `CACHE_NAME`(v13)。SYNC-SPEC 原写「PRECACHE 不变(无新静态文件)」,但那条假设不成立——不预缓存则更新后首次离线打开会因 ES module 加载失败整站挂掉。按 CLAUDE.md「新增静态文件必须进预缓存」硬规则处理。
+  - 离线(`!navigator.onLine`)跳过;`persist()` 后 debounce 2s 执行完整 pull→merge→push,不再盲推。
+  - **不同主密码 → 解密失败 → 本地不受影响且没有 PUT**——这是端到端加密的正确表现,非 bug。
+  - userId 走独立 key `tigang_sync_user`,不进 settings/exportJSON;它是高熵读写凭据而非公开编号,泄露后存在密文读取、覆盖与弱密码离线猜解风险。
+- **发版注意**:app.js import 的 `sync/client.mjs` 与 `sync/coordinator.mjs` 都必须进 sw.js 预缓存清单;缺任一个都会导致更新后首次离线打开因 ES module 加载失败整站挂掉。当前缓存版本 v17。
 - **仓库演进计划**:后端暂放本仓库 `sync-server/` 子目录(前后端契约同 PR、一眼对齐、首版落地最快)。`client.mjs` 强制不依赖 app.js + `origin` 参数化,为将来拆独立仓库留口子。**拆仓触发条件**:time-logger 要同步时,把 `sync-server/` 整体迁出成独立仓库(拟名 `eigentime-sync`),tigang-companion 与 time-logger 通过 git submodule 或 npm link 引用;客户端代码零改动,只是后端服务换仓库地址。遵循 ROADMAP「先验证再投入」原则——单仓库够用时不提前拆。
 
 ### D32 计数徽标化:空闲态紧凑徽标 + 训练中隐藏(R5,2026-08-05)
@@ -223,6 +223,8 @@
 - **为什么用 renderTrain 驱动而非显式事件**:显隐要覆盖 开始/暂停/继续/完成/重置/后台切回 所有路径,而 renderTrain 每 100ms 无条件跑,`hidden = running` 是纯状态投影,天然覆盖所有路径,零遗漏。代价是每帧多一次赋值,无感。
 
 ### D33 同步安全审计 + 修复(审计发现 1-3,2026-08-07)
+
+> 历史记录:D33 的布尔门闸方案已被 D34 的 generation 编排器整体替代;当前实现与准据看 D34/SPEC §6.z。
 
 用户提了关键问题:「如果两个用户都用 1234 当密码,会不会相互覆盖」——这触发了完整审计,找到三条需要修的(core/sync 加 pure fn 其余 app/server/ui/贴中)。
 
@@ -275,6 +277,30 @@
 - `.dlg`:`max-height: min(88vh, 650px)` + `overflow-y:auto`;`.dlg-actions` sticky bottom
 - `.coach-circle`:默认 160px(mobile) / ≥420px 200px(修正原断点方向,小屏反拿大圆)
 - `.card`:margin 14→10px,padding 16→14px(窄屏省控)
+
+### D34 同步编排二次验收:从布尔门闸升级为身份绑定流水线(2026-08-07)
+
+D33 修掉了「解密失败后继续 push」这一条路径,但二次验收发现问题本质比一个布尔门闸更大:
+
+- GET 网络/HTTP 失败时 `doSyncPull()` 仍只 return,`syncNow()` 随后照样 PUT,会用未合并的本地快照覆盖远端。
+- 应用新 userId 时没有取消既有 debounce、429 retry 或在途请求;旧任务在 `await` 后读取新的全局 `syncUserId`,存在串桶风险。
+- `persist()` 自动同步直接 encrypt→push,没有先拉取远端;多设备同时活跃时会扩大 last-write-wins 的丢更新窗口。
+- 429 重试重放旧 PUT,等待期间远端若有新变化仍可能被旧快照覆盖。
+- 首次启用只在真正网络请求时才生成 ID,且生成后不刷新输入框,主流程必须关掉再打开设置才能复制。
+
+修复不是继续叠标志,而是新增独立 `sync/coordinator.mjs`,建立三条硬不变量:
+
+1. **PUT 前置条件**:同一 generation + 同一 userId/passphrase 下,本轮 GET 必须成功解密并合并,或明确返回 `none`;任何拉取/解密失败都结束本轮。
+2. **身份生命周期**:userId、主密码、启用状态任一变化 → generation++、清 debounce/retry timer、AbortController 取消 fetch;每个异步步骤只使用启动时快照,旧结果不得落地或更新 UI。
+3. **所有入口同路**:手动、启动、`persist()` 防抖、429 重试全部走 pull→merge→深快照→encrypt→push;重试必须重新 GET。同步期间又有本地变化则记 rerun,当前轮结束后再跑一轮。
+
+配套:
+
+- `sync/client.mjs` 支持外部 AbortSignal,GET 强制 `cache:'no-store'`;服务端也回 `Cache-Control:no-store`。
+- 开启同步立即生成/显示 ID;同步中禁用「立即同步/应用 ID」只是 UX,安全仍由 generation 保证。
+- `tests/sync-coordinator.test.mjs` 用 deferred promise + fake timer 覆盖网络失败不推、pull/encrypt 中换 ID、timer 取消、429 重新拉取、rerun 与深快照。
+- systemd 明确绑定 docker0 `172.17.0.1`,修复「文档让容器连 docker0,进程却只监听 loopback」的不可复现部署。
+- 圆尺寸媒体查询按既定契约修正:≥420px 才 200px,极矮屏强制 160px。
 
 ### D8 已知限制 / Backlog
 - **提醒**:无后端 ⇒ 无 Web Push;通知仅在页面打开时由 setTimeout 触发。iOS 需 16.4+ 且安装到主屏才有通知能力。若要可靠提醒,后续加个极简 push 服务或打包原生。

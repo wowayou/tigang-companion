@@ -14,12 +14,12 @@ export const SYNC_TIMEOUT_MS = 10000;
  * GET <origin>/sync?key=<userId> → 拉密文。
  * 成功: { ok:true, blob }——blob 为 encryptBlob 返回的对象(线路上是密文 JSON 串,这里解析回对象)
  * 远端无数据(首次): { ok:false, error:'none', blob:null }
- * 网络/超时: { ok:false, error:'network' }
+ * 网络/超时/外部取消: { ok:false, error:'network' };GET 强制 no-store。
  */
-export async function syncPull(origin, userId) {
+export async function syncPull(origin, userId, { signal } = {}) {
   try {
     const url = `${origin}/sync?key=${encodeURIComponent(userId)}`;
-    const { res, network } = await request(url);
+    const { res, network } = await request(url, { cache: 'no-store' }, signal);
     if (network) return { ok: false, error: 'network' };
     if (!res.ok) return { ok: false, error: 'network' };
     const data = await res.json();
@@ -44,9 +44,9 @@ export async function syncPull(origin, userId) {
 /**
  * PUT <origin>/sync?key=<userId> body {blob} → 推密文(覆盖,last-write-wins)。
  * blob 可以是 encryptBlob 的对象或已序列化字符串,上线前统一序列化为密文 JSON 串(server 契约是字符串)。
- * 成功: { ok:true };限流: { ok:false, error:'rate' };超限: { ok:false, error:'too-big' };网络: { ok:false, error:'network' }
+ * 成功: { ok:true };限流: { ok:false, error:'rate' };超限: { ok:false, error:'too-big' };网络/取消: { ok:false, error:'network' }
  */
-export async function syncPush(origin, userId, blob) {
+export async function syncPush(origin, userId, blob, { signal } = {}) {
   try {
     const url = `${origin}/sync?key=${encodeURIComponent(userId)}`;
     const payload = typeof blob === 'string' ? blob : JSON.stringify(blob);
@@ -54,7 +54,7 @@ export async function syncPush(origin, userId, blob) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ blob: payload }),
-    });
+    }, signal);
     if (network) return { ok: false, error: 'network' };
     if (res.status === 413) return { ok: false, error: 'too-big' };
     if (res.status === 429) return { ok: false, error: 'rate' };
@@ -67,9 +67,9 @@ export async function syncPush(origin, userId, blob) {
 }
 
 /** GET <origin>/health → 探活。{ ok:true } | { ok:false, error:'network'|'unknown' } */
-export async function syncProbe(origin) {
+export async function syncProbe(origin, { signal } = {}) {
   try {
-    const { res, network } = await request(`${origin}/health`);
+    const { res, network } = await request(`${origin}/health`, { cache: 'no-store' }, signal);
     if (network) return { ok: false, error: 'network' };
     if (!res.ok) return { ok: false, error: 'unknown' };
     const data = await res.json();
@@ -79,10 +79,19 @@ export async function syncProbe(origin) {
   }
 }
 
-/** fetch 封装:10s 超时;网络/超时 → { network:true },HTTP 响应 → { res }。不抛。 */
-async function request(url, init = {}) {
+/** fetch 封装:10s 超时 + 可选外部 signal;网络/超时/取消 → { network:true },HTTP 响应 → { res }。不抛。 */
+async function request(url, init = {}, externalSignal) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+  let detachExternalAbort = null;
+  if (externalSignal) {
+    const abort = () => controller.abort();
+    if (externalSignal.aborted) abort();
+    else {
+      externalSignal.addEventListener('abort', abort, { once: true });
+      detachExternalAbort = () => externalSignal.removeEventListener('abort', abort);
+    }
+  }
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
     return { res };
@@ -90,5 +99,6 @@ async function request(url, init = {}) {
     return { network: true };
   } finally {
     clearTimeout(timer);
+    if (detachExternalAbort) detachExternalAbort();
   }
 }

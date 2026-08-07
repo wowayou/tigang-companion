@@ -1,5 +1,7 @@
 # 多端同步 — 执行规格(路线 C:自建甲骨文后端 + 端到端加密)
 
+> **历史规格,已完成且部分实现被替代。当前准据是 `SPEC.md §6.z` 与 `DEVELOPMENT.md D34`;尤其禁止照本文件的“直接 push/10s 限流/nginx 负责 CORS”旧描述实现。**
+
 > 本文件是给执行 agent(如 deepseek-v4-flash)的派活依据。在本仓库目录内执行后端,在甲骨文凤凰城实例部署。
 > **路线 C(用户拍板 2026-08-05)**:自建 Node 单文件后端跑在甲骨文 always-free 实例,
 > nginx 反代 TLS+CORS,SQLite 存**端到端加密**密文 blob。CORS 自主可控、零 Cloudflare 计费干扰、KV 写限额问题消失。
@@ -30,7 +32,7 @@
 
 **完整性(✅)**:由 AES-GCM 的认证标签保证。后端不解析内容,无法引入数据损坏(除了整体覆盖)。
 
-**可用性(⚠️ 无账号模型的权衡,非设计缺陷)**:无账号 = 后端 `/sync` 端点公开。任何人知道/猜到 userId 都能 PUT 垃圾密文覆盖该用户。但:① userId 是 `crypto.randomUUID()`(122 位熵)猜不到;② 即便 userId 泄露被覆盖,攻击者**没有主密码造不出能被受害者主密码解开的合法密文**→ 受害者下次 `syncPull`→`decryptBlob` 失败→**静默降级,本地数据不丢**→ 用本地数据重推即恢复。最坏后果=解密失败一次、本地不丢、重推恢复。**这是端到端加密的天然韧性,要写进 D31**。
+**可用性/凭据泄露(⚠️ 无账号模型的权衡)**:userId 是 122 位熵的读写寻址凭据,远程枚举不可行,但一旦泄露,攻击者可 GET 密文、离线猜弱主密码并 PUT 覆盖。因此 ID 与主密码都要保密并分开传递;本地数据是恢复底线,不能把泄露后果描述成“只覆盖且绝对解不开”。
 
 **权限/账号(不做账号是对的)**:账号体系撞隐私基调(「连邮箱都不要」是卖点)、引入复杂度(登录态/找回/删除合规)。最小防线两层(都不是账号):① userId 不公开、不进 exportJSON;② 写入限流(后端侧,见单元 0)。这两层防不住 determined 攻击者用大量 userId 慢刷,但那种攻击动机为零(密文无价值),且后端单机本身的可观测性(nginx 日志)足以发现异常。**判断:对个人健康陪伴工具量级和场景,这个无账号+端到端加密模型是负责任的**。用户 opt-out("觉得不安全就不开")是最终安全阀。
 
@@ -138,7 +140,7 @@ server {
 ### 验收闸门
 
 - 本地 `node --experimental-sqlite sync-server/server.mjs`,curl 走 PUT/GET 往返:PUT `{blob:"test"}` → GET 回 `"test"` → 覆盖 → 回新值。OPTIONS 204+CORS。
-- 1MB 上限拒。同 key 10s 内第二次 PUT → 429。同 IP 21次/分钟 → 429。
+- 1MB 上限拒。同 key 3s 内第二次 PUT → 429。同 IP 21次/分钟 → 429。
 - 部署到甲骨文后,`https://sync.eigentime.org/health` 返回 `{ok:true}`,浏览器 devtools fetch PUT/GET 通(关键验 CORS)。
 - `node --check sync-server/server.mjs` 过。
 - 计数 Worker(`worker/`)**零改动**,回归正常。
@@ -241,7 +243,7 @@ const SYNC_ORIGIN = 'https://sync.eigentime.org'; // 自建甲骨文后端;换�
 - 打开应用:`load()` 后,若 `sync.enabled && 主密码已输入` → 后台 `syncPull` → `decryptBlob` → `mergeForSync(local, remote)` → `save()` → `renderStats()`。任一步失败静默降级纯本地。
 - `persist()` 后:debounce 2s,若启用 → `encryptBlob(data, 主密码)` → `syncPush`。失败静默,下次打开重试。
 - 离线(`!navigator.onLine`)跳过。
-- 首次启用:`newUserId()` 存 localStorage 独立 key `tigang_sync_user`(明文,userId 不敏感——泄露只意味别人可覆盖密文,无主密码解不开,且本地可重推恢复)。
+- 首次启用:`newUserId()` 存 localStorage 独立 key `tigang_sync_user`。userId 是高熵读写凭据,泄露者可读取/覆盖密文并对弱主密码离线猜解,不得公开。
 
 ### UI(index.html 设置弹窗加一组,新增 DOM id)
 
@@ -287,7 +289,7 @@ const SYNC_ORIGIN = 'https://sync.eigentime.org'; // 自建甲骨文后端;换�
   - 花费(0,always-free;无意外账单;单机房无 SLA 的诚实限制)。
   - ts schema 向后兼容(旧记录无 ts=0)。
   - 时区(dateStr 本地 + ts 辅助 LWW)。
-  - 已知限制:① PWA 不后台同步(打开才同步);② 同 dateStr 同内容(撞指纹)去重;③ 主密码丢失=远端密文不可恢复(本地不丢);④ 限流 1次/10s per userId + 20次/分 per IP;⑤ 单机房凤凰城,机器挂=同步断(降级本地不丢);⑥ 迁移性:client.mjs 抽象了 origin,未来可换 Worker 后端,端到端加密不变。
+  - 已知限制:① PWA 不后台同步(打开才同步);② 同 dateStr 同内容(撞指纹)去重;③ 主密码丢失=远端密文不可恢复(本地不丢);④ 限流 1次/3s per userId + 20次/分 per IP;⑤ 单机房凤凰城,机器挂=同步断(降级本地不丢);⑥ 迁移性:client.mjs 抽象了 origin,未来可换 Worker 后端,端到端加密不变。
   - **仓库演进计划**:后端暂放本仓库 `sync-server/` 子目录(前后端契约同 PR、一眼对齐、首版落地最快)。`client.mjs` 强制不依赖 app.js + `origin` 参数化,为将来拆独立仓库留口子。**拆仓触发条件**:time-logger 要同步时,把 `sync-server/` 整体迁出成独立仓库(拟名 `eigentime-sync`),tigang-companion 与 time-logger 通过 git submodule 或 npm link 引用;客户端代码零改动,只是后端服务换仓库地址。遵循 ROADMAP「先验证再投入」原则——单仓库够用时不提前拆。
 - `ROADMAP.md`:G2 从 Gated 移到 Next,注明「opt-in + 端到端加密 + 自建后端只见密文」。
 - `SPEC.md`:全部契约落齐。

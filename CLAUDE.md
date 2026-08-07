@@ -14,8 +14,8 @@ git push               # push main → Actions 自动 npm test + 组装部署 + 
 
 ## 架构
 
-- `core/` 纯函数层,四个模块:engine.js(训练状态机)、stats.js(打卡统计)、storage.js(存取+备份解析/合并)、achievements.js(成就徽章/今日目标)。**禁止**在 core/ 里访问 DOM、`Date.now()`、`localStorage`——时间与 storage 一律参数注入,这是可测性的根基。
-- `app.js` 唯一的胶水层:DOM、定时器、音频/语音/震动/通知、计数客户端、导入导出都只在这里。
+- `core/` 纯函数层,五个模块:engine.js(训练状态机)、stats.js(打卡统计)、storage.js(存取+备份解析/合并)、achievements.js(成就徽章/今日目标)、sync.js(加密/解密/LWW/UUID)。**禁止**在 core/ 里访问 DOM、`Date.now()`、`localStorage`——时间与 storage 一律参数注入,这是可测性的根基。
+- `app.js` 是 UI 胶水层;多端同步的异步生命周期独立在 `sync/coordinator.mjs`,网络封装在 `sync/client.mjs`。编排器必须保持「任何 PUT 前同身份 GET 成功或明确 none」的不变量,禁止从 app.js 绕过协调器直接 push。
 - 契约(函数签名、状态字段、DOM id)以 `SPEC.md` 为准;改接口必须同步改 SPEC + 两侧调用 + 测试。
 - 部署形态:根路径 = `site/` 落地页(不是 PWA 的一部分),`/app/` = PWA(由 `tools/build-site.mjs` 组装,运行时清单单一真源 = sw.js 的 `PRECACHE_URLS`)。改预缓存清单要同时注意组装脚本。
 
@@ -25,6 +25,7 @@ git push               # push main → Actions 自动 npm test + 组装部署 + 
 - 打卡日期用本地 `YYYY-MM-DD` 字符串,不用时间戳(时区 bug 防线,见 DEVELOPMENT.md D5)。
 - 零依赖是硬约束:不加 npm 包、不引 CDN。
 - 新增静态文件要同步进 sw.js 预缓存清单,并升级 `CACHE_NAME` 版本号,否则用户拿不到更新。
+- 改同步身份(userId/主密码/启用状态)必须使旧 generation 的 timer/fetch/result 全部失效;429 重试必须重新 pull,不能重放旧 PUT。
 - 健康/医疗文案改动需保留免责声明,依据与复核提示见 DEVELOPMENT.md D6。
 - 「维持」阶段(engine.js 的 `holdSec`):`holdSec=0` 必须永远等价于 v1 的两段式行为(收紧直接计数、无维持段)——这是回归防线,改状态机时先确认这条没破。
 - `holdSec` 是 storage.js `DEFAULT_SETTINGS` 里的**全局键**,不是 custom 方案的字段——一个概念只允许一份真相,四个预设和自定义方案都共用同一个"维持"开关。

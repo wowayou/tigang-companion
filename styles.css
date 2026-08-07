@@ -1110,16 +1110,17 @@ body {
 }
 
 @media (min-width: 420px) {
+  .coach-circle { width: 200px; height: 200px; }
   .countdown { font-size: 62px; }
 }
 
 /*
- * 极矮屏(如 iPhone SE、或浏览器地址栏占位后)优先保住「圆 + 要领 + 呼吸 + 按钮」全部可见。
+ * 极矮屏(如 iPhone SE、或浏览器地址栏占位后)优先保住「圆 + 进度 + 按钮」全部可见。
  * 注意这里必须覆盖 min-height:基础规则用的是 min-height + flex:1,只改 height 是不起作用的。
  */
 @media (max-height: 700px) {
   .coach { min-height: 186px; }
-  .coach-circle { width: 200px; height: 200px; }
+  .coach-circle { width: 160px; height: 160px; }
   .countdown { font-size: 46px; }
   .phase-label { font-size: 15px; }
 }

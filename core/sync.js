@@ -170,7 +170,7 @@ export function mergeForSync(local, remote) {
 
 /* ---------------- userId ---------------- */
 
-/** 生成匿名 userId(crypto.randomUUID,122 位熵,猜不到;泄露也只意味着别人可覆盖密文,无主密码解不开)。 */
+/** 生成匿名 userId(crypto.randomUUID,122 位熵,不可枚举;它是密文桶的读写凭据,仍须保密)。 */
 export function newUserId(crypto = globalThis.crypto) {
   if (crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
   const bytes = crypto.getRandomValues(new Uint8Array(16));

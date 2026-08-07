@@ -44,7 +44,7 @@
 
 - **必读**:CLAUDE.md(约定/命令)→ SPEC.md(契约)→ DEVELOPMENT.md(D1–D29,重点 D28)。
 - **命令**:`npm test`(core/ 改动必跑,裸 `node --test`);`node tools/build-site.mjs`(组装 dist);`git push`(CI 自动:测试→Pages→计数 Worker,Worker 需 `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets,已配置)。
-- **红线**:零依赖(不加 npm 包/CDN);`core/` 禁 DOM / `Date.now()` / `localStorage`;计数 Worker 是「零后端」唯一例外;发版升 `sw.js` 的 `CACHE_NAME`;改接口(函数签名/状态字段/DOM id)同步 SPEC;「维持」`holdSec` 是全局键,`holdSec=0` 必须等价 v1 两段式。
+- **红线**:零依赖(不加 npm 包/CDN);`core/` 禁 DOM / `Date.now()` / `localStorage`;外部服务只有计数 Worker 与 opt-in 密文同步后端;发版升 `sw.js` 的 `CACHE_NAME`;同步 PUT 不得绕过 `sync/coordinator.mjs`;改接口同步 SPEC;「维持」`holdSec` 是全局键,`holdSec=0` 必须等价 v1 两段式。
 - **计数 Worker 本地验证**:`cd worker && npx wrangler dev`(会生成 `worker/.wrangler/`,已 gitignore);协议 + Hibernation 坑见 `worker/worker.js` 顶部注释与 D28。改 WebSocket 逻辑前**先确认走类方法还是 addEventListener**。
 - **建议接手顺序**:① ~~音效 2/3~~ ✅ 已完成(D30)→ ② 导入导出跨设备 1 → ③ 计数放置 5(已有调研,可立项)→ ④ 排行榜 4(维持 gated,不动)。
 
@@ -52,5 +52,5 @@
 
 - 计数:训练会话存活期间线上 `/stats` 返回 `doing:1`(2026-08-05 实测)。
 - 落地页:无「换了域名」段落;应用:`btn-share`/`dlg-share` 已上线;`sw.js` = `tigang-v12`(R2/R3 发版已升)。
-- 测试:`npm test` 78 全绿;`node --check` 全过;构建正常;app.js 引用的 71 个 DOM id 全部存在于 index.html。
+- 测试:`npm test` 当前 107 全绿;`node --check` 全过;构建正常;app.js 引用的 81 个 DOM id 全部存在于 index.html,模块依赖图全部进入预缓存。
 - R2/R3 轻提示:一次性脚本喂 `maybePhaseTick` 真实源码,确认 prepare 3 声倒数、rest 呼吸拍 392/330 交替 + 末 3 秒 440、后台跳变不补拍、暂停静音、开关关闭全静、用力阶段无声、短休息(1–8s)退化为纯倒数。

@@ -6,7 +6,8 @@
 #   3. 把「http 块内」那一行 limit_req_zone 加进 http { } 顶层。
 #   4. nginx -t && systemctl reload nginx
 #
-# CORS 全在 nginx 加,后端逻辑更干净(server.mjs 里也带同名头,nginx 层优先)。
+# CORS/no-store 由 server.mjs 单一负责;反代层不要重复 add_header,否则可能形成重复的
+# Access-Control-Allow-Origin 响应头而被浏览器拒绝。
 # X-Forwarded-For 用 $remote_addr 覆写:后端只监听回环,trusted proxy 只有本机 nginx,
 # 所以这个头是可信的,后端用它做 per-IP 限流。
 
@@ -16,15 +17,6 @@ server {
 
   ssl_certificate     /etc/letsencrypt/live/sync.eigentime.org/fullchain.pem;
   ssl_certificate_key /etc/letsencrypt/live/sync.eigentime.org/privkey.pem;
-
-  # CORS(应用无 cookie/凭据,用 * 最简)
-  add_header Access-Control-Allow-Origin  "*" always;
-  add_header Access-Control-Allow-Methods "GET,PUT,OPTIONS" always;
-  add_header Access-Control-Allow-Headers "Content-Type" always;
-  add_header Access-Control-Max-Age       "86400" always;
-
-  # preflight 短路(浏览器 PUT 前必发一次;响应头 CORS 已带,204 即过)
-  if ($request_method = OPTIONS) { return 204; }
 
   location / {
     limit_req zone=sync burst=20 nodelay;   # nginx 层兜底限流(见 http 块)

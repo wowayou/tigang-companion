@@ -6,6 +6,7 @@ import {
   encryptBlob,
   decryptBlob,
   mergeForSync,
+  normalizeUserId,
   newUserId,
 } from '../core/sync.js';
 
@@ -166,6 +167,24 @@ test('null/非法入参 → 空结果,不抛', () => {
   const { merged, conflicts } = mergeForSync([{ dateStr: '2026-08-01', completedReps: 3, totalReps: 3, durationSec: 30, finished: true }], []);
   assert.equal(merged.length, 1);
   assert.equal(conflicts, 0);
+});
+
+test('normalizeUserId:合法/非法/空白/大小写/首尾空格', () => {
+  const id = '7309f8e0-d5a4-4a6b-8e15-295b3f9a1c42';
+  assert.deepEqual(normalizeUserId(id), { ok: true, userId: id });
+  // 大小写不敏感,统一小写
+  assert.deepEqual(normalizeUserId(id.toUpperCase()), { ok: true, userId: id });
+  // 首尾空白宽容
+  assert.deepEqual(normalizeUserId(`  ${id}  `), { ok: true, userId: id });
+  // 非法格式
+  assert.equal(normalizeUserId('').ok, false);
+  assert.equal(normalizeUserId('testuser').ok, false);
+  assert.equal(normalizeUserId('not-a-uuid').ok, false);
+  assert.equal(normalizeUserId( '7309f8e0-d5a4-4a6b-8e15-295b3f9a1c4').ok, false); // 少一位
+  assert.equal(normalizeUserId('7309f8e0-d5a4-4a6b-8e15-295b3f9a1c422').ok, false); // 多一位
+  // null/undefined 防御
+  assert.equal(normalizeUserId(null).ok, false);
+  assert.equal(normalizeUserId(undefined).ok, false);
 });
 
 test('newUserId:合法 UUID v4 格式,且两次不同', () => {

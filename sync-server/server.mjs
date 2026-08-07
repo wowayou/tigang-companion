@@ -37,10 +37,15 @@ const DB_PATH =
 
 const MAX_BLOB_BYTES = 1024 * 1024; // 1MB 密文上限
 const MAX_BODY_BYTES = MAX_BLOB_BYTES + 4096; // JSON 外壳余量
-const USER_PUT_INTERVAL_MS = 10_000; // 同 userId PUT 最小间隔
+// 同 userId PUT 最小间隔。3s 而非 10s:多设备共用同一个 userId(手填同步 ID 后)
+// 会共享这个额度——手机推完 10s 内打开电脑就撞 429,同步显得"偶尔不灵"。
+// 防滥用的本意是拦脚本狂刷,3s 足够;客户端收到 rate 还会自动延后重试一次。
+const USER_PUT_INTERVAL_MS = 3_000;
 const IP_RATE_WINDOW_MS = 60_000; // 单 IP 限流时间窗
 const IP_RATE_LIMIT = 20; // 时间窗内请求上限
 const MAX_KEY_LEN = 128;
+// userId 必须是 UUID(客户端 newUserId() 的产物);任意字符串不许建桶。
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /* ---------------- SQLite ---------------- */
 
@@ -202,7 +207,10 @@ const server = createServer((req, res) => {
   }
   if (path === '/sync') {
     const key = String(url.searchParams.get('key') || '');
-    if (!key || key.length > MAX_KEY_LEN) {
+    // 必须是 UUID:客户端 newUserId() 只生成 UUID v4,后端同样校验,
+    // 免得任意字符串都能建桶(如手填时打成 "testuser" 会撞上别人/测试残留的桶)。
+    // 客户端也校验,但纯前端校验可绕过,这里是最终防线。
+    if (!UUID_RE.test(key) || key.length > MAX_KEY_LEN) {
       console.log(`${new Date().toISOString()} 400 ip=${ip} ${req.method} ${req.url}`);
       send(res, 400, { ok: false, error: 'bad-key' });
       return;

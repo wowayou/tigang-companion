@@ -179,3 +179,18 @@ export function newUserId(crypto = globalThis.crypto) {
   const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * 校验并规范化用户手填的同步 ID(多端要指向同一个桶,ID 靠用户从设备 A 复制到设备 B)。
+ * 宽容处理:去首尾空白、统一小写(UUID 大小写等价)。
+ * 只接受 UUID v4 —— 手填时打成任意字符串会撞上别人的桶或建出垃圾桶,后端也做同样校验。
+ * @returns {{ok:true, userId:string} | {ok:false, error:string}}
+ */
+export function normalizeUserId(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return { ok: false, error: 'empty' };
+  if (!UUID_RE.test(s)) return { ok: false, error: 'format' };
+  return { ok: true, userId: s.toLowerCase() };
+}

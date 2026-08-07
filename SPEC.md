@@ -263,23 +263,25 @@ export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
   ```js
   const SYNC_ORIGIN = 'https://sync.eigentime.org'; // 自建甲骨文后端;换后端(未来回 Worker / 本地开发)改这一行
   ```
-- **后端契约**:见 `sync-server/README.md`(不进 SPEC 主体——SPEC 是前端契约)。端点 `PUT/GET /sync?key=<userId>`、`GET /health`;只存取密文字符串,last-write-wins 覆盖;限流 1 次/10s per userId + 20 次/分 per IP。
+- **后端契约**:见 `sync-server/README.md`(不进 SPEC 主体——SPEC 是前端契约)。端点 `PUT/GET /sync?key=<userId>`、`GET /health`;只存取密文字符串,last-write-wins 覆盖;**userId 必须为 UUID v4 格式**(前后端双向校验,预防手填时误入非 UUID 建垃圾桶);限流 同 userId PUT ≥ 1次/3s → 429 + 同 IP 20次/分 → 429(多设备共用同一 userId 时共享这个额度,客户端撞 429 会**自动延后重试一次**)。
 - **纯函数层**(`core/sync.js`,可迁移到 time-logger):
   - `encryptBlob(plaintextObj, passphrase, crypto=globalThis.crypto)` → `{v:1,salt,iv,ct,iter}`(PBKDF2-SHA256 200000 轮 + AES-GCM-256)。
   - `decryptBlob(blob, passphrase, crypto)` → `{ok:true,data} | {ok:false,error}`;错误主密码 / 损坏密文 → `{ok:false}` **不抛**(调用方静默降级纯本地)。
   - `mergeForSync(local, remote)` → `{merged, conflicts}`:同指纹(`dateStr|completedReps|totalReps|durationSec|finished`)去重不计冲突;同 dateStr 不同指纹 LWW(有 ts 取大,平 ts / 都无 ts 留 remote),conflicts 按被淘汰记录数计;其余全保留;输出按 dateStr 升序,**顺序无关**。
   - `newUserId(crypto)` → UUID v4。
+  - `normalizeUserId(raw)` → `{ok:true, userId} | {ok:false, error}`——校验并规范化手填的同步 ID;去首尾空白、统一小写,**只接受 UUID v4**(后端也做同样校验,最终防线)。
   - crypto 一律参数注入(默认 `globalThis.crypto`);core 不碰 DOM / `Date.now()` / `localStorage`。
 - **记录 schema**:record 可带可选 `ts`(毫秒时间戳,`app.js writeRecord` 注入 `Date.now()`);旧记录无 ts 视为 0,向后兼容。
 - **浏览器客户端**(`sync/client.mjs`):`syncPull/syncPush/syncProbe`,origin 参数化,AbortController 10s 超时,任何失败 `{ok:false,error}` 不抛;CORS 失败与断网统一 `'network'`。
-- **userId 独立 key**(`tigang_sync_user`,明文 localStorage):不进 settings、不进 exportJSON。泄露只意味着别人可覆盖密文,无主密码解不开,本地可重推恢复。
+- **userId 独立 key + 多设备链接(手填,非自动派生)**:`newUserId()` 生成随机 UUID v4,存 localStorage 独立 key `tigang_sync_user`(不进 settings/exportJSON)。**为什么不从主密码自动派生**(审计结论,2026-08-07):派生方案下两个不同用户用相同主密码(如 `1234`)会算出一模一样的 userId → 撞型同一个桶 → 互相覆盖密文、云端数据反复被摧毁、受害者持续看到「解密失败」→ 比"不同设备同步不到一起"更严重。因此**多设备指向同一个桶靠用户手工操作**:设备 A 的同步 ID 显示在 `#opt-sync-user`(只读),点「复制」按钮(`#btn-sync-copy`)复制 → 设备 B 粘贴到 `#opt-sync-link` 里点「应用」(`#btn-sync-link`)→ `normalizeUserId` 校验 UUID 格式 → 写入本机 localStorage 覆盖 `tigang_sync_user` → 两设备同一 userId → 同一个后端桶。复制降级:clipboard API 失败→选中文本让用户手动 Ctrl+C 并提示。userId 不是密码,但 UI 诚实注明"别公开(别人拿到能覆盖你的密文,虽然解不开)"。
+- **解密失败 → 锁死一切推送**(审计发现 1,2026-08-07):`syncDecryptFailed` 模块标志,`doSyncPull` 解密失败→置 true→**禁止 doSyncPush(含 syncNow 和自动推 scheduleSyncPush)**——否则本机会用错误主密码加密的密文覆盖云端那份额正确加密的有效数据,两边都坏。主密码变更(input)→清除该标志(允许重试)。正确主密码再次 pull → 解密成功 → 置 false(恢复推送)。
 - **主密码缓存策略(会话级,2026-08-05 优化)**:主密码不进 localStorage / settings / exportJSON,只进内存 + `sessionStorage`(键 `tigang_sync_pass`,输入即写)。**sessionStorage 生命周期=tab 会话**:同一 tab 内刷新不丢,关 tab 丢;PWA 从主屏图标启动有时算新会话也丢——属可接受降级,丢=回到「进设置输一次」的老流程,不崩。**用户主动改主密码→覆盖写新值;关闭同步→清空**。忘了主密码=远端密文不可恢复,**本地数据不丢**,重输=重新开始同步。权衡(同源 XSS 可读,与 userId 明文同风险等级)见 DEVELOPMENT.md D31。
 - **同步时机**(无新定时器):
   - 打开应用:若 `sync.enabled && 主密码可用(本会话输入或 sessionStorage 回填)` → 后台 pull → decrypt → merge(只合记录,设置保留本机)→ save → renderStats;任一步失败静默降级纯本地。
   - 首次启用引导:勾「启用同步」自动展开主密码组并聚焦;`doSyncPull` 收到远端 `none`(无数据)记 `syncRemoteEmpty` 标志,`syncNow` 据此**跳过 pull 直接推**(首次纯 push);首次推送成功状态显示「已开启同步 · 本机数据已上传」。
   - `persist()` 后:debounce 2s,若启用且有主密码且在线 → encrypt → push;失败静默,下次打开重试。
   - 离线(`!navigator.onLine`)跳过。
-- **UI**(设置弹窗一组,新增 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#btn-sync-now` `#sync-last` `#sync-state`;主密码/按钮/状态行包在无 id 的 `.sync-setup` 容器内,**开关关时 `hidden` 收起整组**;状态行按 `sync-ok`(成功绿)/`sync-err`(失败橙)/`sync-busy`(进行中灰)着色。
+- **UI**(设置弹窗一组,新增/更新 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#opt-sync-user`(本机同步 ID,只读) `#btn-sync-copy`(复制同步 ID) `#opt-sync-link`(粘贴另一台设备的同步 ID) `#btn-sync-link`(应用链接 ID) `#btn-sync-now` `#sync-last` `#sync-state`;`.input-with-copy` 行(输入框 flex:1 + 按钮固定不换行);主密码/按钮/状态行包在无 id 的 `.sync-setup` 容器内,**开关关时 `hidden` 收起整组**;状态行按 `sync-ok`(成功绿)/`sync-err`(失败橙)/`sync-busy`(进行中灰)着色。
 - **正确性说明**:**不同主密码 → 解密失败 → 静默降级本地、UI 显示「解密失败」** 是端到端加密的正确表现,不是 bug;离线打开纯本地不报错。
 
 ## §7 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
@@ -417,7 +419,7 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 76 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 81 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -432,7 +434,7 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` |
 | 分享弹窗 | `dlg-share` `share-img` `btn-save-share` `btn-share-close` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
-| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` `opt-sync-enabled` `opt-sync-master` `btn-sync-now` `sync-last` `sync-state` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` `opt-sync-enabled` `opt-sync-master` `opt-sync-user` `btn-sync-copy` `opt-sync-link` `btn-sync-link` `btn-sync-now` `sync-last` `sync-state` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
 
 ### §8.z 全站计数(空闲态紧凑徽标:此刻在做人数 + 总访问)
@@ -509,5 +511,7 @@ sync.test.mjs 至少覆盖:encryptBlob/decryptBlob 往返、错误主密码 → 
 再一轮修订(`CACHE_NAME` → `tigang-v14`):
 
 17. **同步体验优化(主密码会话级缓存 + 首次引导 + UI 简化,默认仍可选取舍不变)**:主密码从「纯内存态」改为「内存 + `sessionStorage`(键 `tigang_sync_pass`,输入即写)」——tab 内刷新不丢、关 tab 丢,PWA 新会话丢=降级重输不崩;不进 localStorage/settings/exportJSON。首次启用引导:勾选自动展开主密码组并聚焦,远端确认无数据(`none`)后 `syncNow` 跳过 pull 直接推,首次推送成功提示「已开启同步 · 本机数据已上传」。UI:主密码/按钮/状态行包进 `.sync-setup`(无新 id)开关关时 `hidden` 收起;状态行按 `sync-ok`(绿)/`sync-err`(橙)/`sync-busy`(灰)着色。**core/sync.js 零改、后端/限流/合并逻辑零动**。契约见 §6.z,权衡见 DEVELOPMENT.md D31。
+
+18. **同步安全审计修复(审计发现 1-3,2026-08-07,commit 见 D33)**:审计发现三项——① 🔴**解密失败后无条件推送会覆盖云端正确密文**(`syncNow` 先 pull 后 push,解密失败时 doSyncPull return 但 doSyncPush 照样执行)→加 `syncDecryptFailed` 门闸锁死一切 push,主密码变更清除,正确密码重新拉成功恢复;② userId 随机生成→两台设备不同桶永远同步不到一起→改为**手填同步 ID**(`normalizeUserId` 纯函数 + `#opt-sync-user`/`#btn-sync-copy`/`#opt-sync-link`/`#btn-sync-link` UI + 后端 UUID 格式校验),不选从主密码派生(两个用户用相同弱密码会撞桶互相摧毁云端数据);③ 后端限流间隔 10s→3s + 客户端 `rate` 时自动延后重试一次(多设备共用同一 userId 共享额度);后端加 UUID_RE 双向校验预防手填误入。**core/sync.js 加 `normalizeUserId`,其余全在 app.js / server.mjs / UI。** 完整审计与撞桶论证见 DEVELOPMENT.md D33。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

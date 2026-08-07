@@ -176,8 +176,8 @@ body {
 }
 
 .card {
-  margin: 0 0 14px;
-  padding: 16px;
+  margin: 0 0 10px;
+  padding: 14px;
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow);
@@ -411,8 +411,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  width: 200px;
-  height: 200px;
+  width: 160px;
+  height: 160px;
   border-radius: 50%;
   /*
    * 底色用 background-color(可过渡),立体感交给一层固定不变的叠加渐变。
@@ -935,6 +935,9 @@ body {
 
 .dlg {
   width: min(92vw, 380px);
+  max-height: min(88vh, 650px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 20px;
   border: 0;
   border-radius: 18px;
@@ -1045,13 +1048,36 @@ body {
   width: 100%;
 }
 
+/* 输入框 + 按钮的紧凑行:输入框 flex:1 吃满剩余空间,按钮不换行固定在右边。 */
+.input-with-copy {
+  display: flex;
+  gap: 8px;
+}
+
+.input-with-copy .text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.input-with-copy .copy-btn {
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 7px 12px;
+}
+
+.input-with-copy .link-btn {
+  flex: 0 0 auto;
+  font-size: 13px;
+  padding: 8px 14px;
+}
+
 .opt-actions {
   padding: 11px 0;
 }
 
 .opt-actions .btn { flex: 1; }
 
-/* 同步状态色:成功绿 / 失败橙 / 进行中灰(只在设置弹窗状态行 #sync-state 上切换)。失败橙复用 flame-ink 暖调,不新增色板 */
+/* 同步状态色:成功绿 / 失败橙 / 进行中灰 */
 #sync-state.sync-ok   { color: #2e7d32; font-weight: 600; }
 #sync-state.sync-err  { color: var(--flame-ink); }
 #sync-state.sync-busy { color: var(--muted); }
@@ -1059,6 +1085,11 @@ body {
 .dlg-actions {
   display: flex;
   margin-top: 16px;
+  /* 完成按钮固定显示在弹窗底部,内容可滚动(弹窗 max-height + overflow-y:auto) */
+  position: sticky;
+  bottom: 0;
+  background: var(--surface);
+  padding-top: 12px;
 }
 
 .dlg-actions .btn { flex: 1; }
@@ -1088,7 +1119,7 @@ body {
  */
 @media (max-height: 700px) {
   .coach { min-height: 186px; }
-  .coach-circle { width: 168px; height: 168px; }
+  .coach-circle { width: 200px; height: 200px; }
   .countdown { font-size: 46px; }
   .phase-label { font-size: 15px; }
 }

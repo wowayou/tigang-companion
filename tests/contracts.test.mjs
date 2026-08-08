@@ -180,6 +180,48 @@ test('后端与 nginx 都不把 userId 写进日志', () => {
   assert.match(nginx, /^\s*access_log off;/m, 'nginx 必须关掉该 location 的 access_log');
 });
 
+/*
+ * 孤儿桶两道防线(见 DEVELOPMENT.md D38)。这里钉的是"两道都还在":
+ * 只留 DELETE 会漏掉清 localStorage / 卸载 / 换手机(没人来调),
+ * 只留 TTL 则用户主动换 ID 后旧桶还要挂满 TTL 才消失。
+ */
+test('孤儿桶治理:DELETE 端点幂等 + TTL 清扫兜底', () => {
+  const server = read('sync-server/server.mjs');
+  const client = read('sync/client.mjs');
+  const app = read('app.js');
+
+  // ① DELETE 必须过 UUID 校验与 IP 限流:它和 GET/PUT 共用 /sync 分支才拿得到这些防线,
+  //    所以校验之后才允许分派(rawKey 校验在分支顶部,DELETE 在其下)。
+  const syncBranch = server.match(/if \(path === '\/sync'\) \{[\s\S]*?\n  \}/);
+  assert.ok(syncBranch, '应能解析 /sync 路由分支');
+  const branch = syncBranch[0];
+  assert.ok(branch.indexOf('bad-key') < branch.indexOf("req.method === 'DELETE'"), 'DELETE 必须在 UUID 校验之后分派');
+  assert.match(server, /'Access-Control-Allow-Methods': '[^']*DELETE/, 'CORS 必须放行 DELETE,否则浏览器 preflight 就挡住了');
+
+  // 幂等:不得因为桶不存在而返回错误 —— 客户端把"成功"当作"远端已无此数据"
+  assert.match(server, /function handleDeleteSync\([\s\S]*?DELETE FROM blobs WHERE user_id = \?[\s\S]*?send\(res, 200, \{ ok: true \}\)/);
+
+  // ② TTL 清扫:启动时扫一次 + 定时扫,按 updated_at 判,且不逐个打印 userId
+  assert.match(server, /function sweepOrphans\(/);
+  assert.match(server, /DELETE FROM blobs WHERE updated_at < \?/);
+  assert.match(server, /setInterval\(sweepOrphans/, '必须周期性清扫,不能只在启动时');
+  assert.equal(/sweep[\s\S]{0,200}keyTag\(/.test(server), false, '清扫日志不得逐个打印 key');
+
+  // ③ 客户端:失败静默(调用点不 await),且只在换新 ID 处调用
+  assert.match(client, /export async function syncDelete\(/);
+  assert.match(app, /import \{ syncDelete \} from '\.\/sync\/client\.mjs'/);
+  const newIdHandler = app.match(/el\.btnSyncNewId\.addEventListener[\s\S]*?\n\}\);/);
+  assert.ok(newIdHandler, '应能解析换新 ID 处理器');
+  assert.match(newIdHandler[0], /syncDelete\(SYNC_ORIGIN, prevUserId\)/, '换新 ID 要删旧桶');
+  // 「填入已有 ID」不能删:那个桶可能正被另一台设备使用
+  const linkHandler = app.match(/el\.btnSyncLink\.addEventListener[\s\S]*?\n\}\);/);
+  if (linkHandler) {
+    assert.equal(linkHandler[0].includes('syncDelete'), false, '填入已有同步 ID 时不得删桶');
+  }
+  // 编排器不碰删除:它的 invalidate() 会 abort 旧身份的在途请求,而删除恰要用旧身份
+  assert.equal(read('sync/coordinator.mjs').includes('syncDelete'), false, '编排器不应参与删桶');
+});
+
 test('1Panel systemd 与部署文档使用同一个 docker0 监听地址', () => {
   const service = read('sync-server/sync.service');
   const deploy = read('DEPLOY-SYNC.md');

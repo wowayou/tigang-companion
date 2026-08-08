@@ -1,7 +1,7 @@
 # sync-server — 提肛陪伴多端同步后端(自建 · 端到端加密)
 
 只存取**密文**的极小 Node 服务:零 npm 依赖(`node:http` + `node:sqlite`),
-PUT/GET 覆盖式存储加密 blob,后端**永不解密、不解析内容、不收主密码**。
+PUT/GET/DELETE 覆盖式存储加密 blob,后端**永不解密、不解析内容、不收主密码**。
 主密码只存在于用户设备的浏览器内存/sessionStorage 会话中,绝不离开设备。
 
 - 前端契约见 `SPEC.md §6.z`;端到端加密 + 合并纯函数在 `core/sync.js`(可迁移 time-logger)。
@@ -14,6 +14,7 @@ PUT/GET 覆盖式存储加密 blob,后端**永不解密、不解析内容、不�
 | `OPTIONS *` | preflight | 短路 204 + CORS 头 |
 | `GET /sync?key=<userId>` | 拉密文 | userId 必须为 UUID v4(服务端统一小写);返回 `{ok:true, blob}` 或 `{ok:false, error:'none'}`(无数据)。blob 原样返回,不解密 |
 | `PUT /sync?key=<userId>` body `{blob}` | 推密文 | 覆盖存储(last-write-wins),返回 `{ok:true}`。**不验证 blob 内容**,只做 ≤1MB 防御 |
+| `DELETE /sync?key=<userId>` | 删桶 | **幂等**:桶不存在也返回 `{ok:true}`。客户端在「换新同步 ID」时调用,清掉旧桶 |
 | `GET /health` | 探活 | `{ok:true}` |
 
 冲突处理:后端**不处理**,只 last-write-wins 覆盖;合并由客户端做(拉→解密→`mergeForSync`→加密→推)。
@@ -27,6 +28,15 @@ PUT/GET 覆盖式存储加密 blob,后端**永不解密、不解析内容、不�
 ## SQLite 文件
 
 - 默认 `sync-server/data/sync.db`(可由环境变量 `DB_PATH` 覆盖),单表 `blobs(user_id, blob, updated_at, put_count)`。
+
+## 孤儿桶治理
+
+端到端加密的后端只有密文,分不清一个桶是被弃用了还是主人半年没打开。两道防线:
+
+1. **`DELETE`(即时)** — 用户在设置里「换新同步 ID」时,客户端删掉旧桶。只覆盖这一条路径。
+2. **TTL 清扫(兜底)** — 超过 `ORPHAN_TTL_MS`(默认 180 天)未 PUT 的桶,进程启动时扫一次、之后每 24h 一次。清 localStorage / 卸载 PWA / 换手机不迁移都不会有人来调 DELETE,只有这道能把「只增不减」变成有界。
+
+**TTL 会删数据**:只抄了 userId + 主密码、超过 180 天没打开过应用、指望回来从远端恢复的用户会拿不到数据(本机还在的用户不受影响,下次 push 自动重建桶)。要更保守就把 `ORPHAN_TTL_MS` 调大。清扫日志只记条数,不记 userId。
 - **备份(必做)**:文件损坏/误删 = 全部用户远端密文丢失(端到端加密保住本地数据不丢,但全员同步状态被重置)。
 - **本项目实际部署的甲骨文机已有 DRBS/restic → R2 增量加密备份**,备份路径含 `/opt`,`/opt/sync-server/data` 会被覆盖;按运维仓库规矩在 `drbs_restic_backup_paths` 显式加 `/opt/sync-server/data` 即可,**不需要下面的 cron**(见 `DEPLOY-SYNC.md` 阶段 2)。
 - 下面这套 cron 热备是给**没有备份体系的裸 VPS**准备的兜底方案。SQLite 单文件,但**不要直接 cp 活文件**(可能截到半写状态),用 `.backup` 在线热备:
@@ -50,6 +60,7 @@ PUT/GET 覆盖式存储加密 blob,后端**永不解密、不解析内容、不�
 | `HOST` | `127.0.0.1` | 程序安全默认值;本项目的 `sync.service` 显式覆盖为 `172.17.0.1` 供 Docker OpenResty 访问 |
 | `PORT` | `8787` | nginx `proxy_pass` 指向它 |
 | `DB_PATH` | 本文件同目录 `data/sync.db` | SQLite 文件位置 |
+| `ORPHAN_TTL_MS` | `180` 天 | 孤儿桶清扫阈值:超过这么久未 PUT 的桶会被删除 |
 
 ## 部署入口
 

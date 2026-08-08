@@ -66,6 +66,26 @@ export async function syncPush(origin, userId, blob, { signal } = {}) {
   }
 }
 
+/**
+ * DELETE <origin>/sync?key=<userId> → 删掉远端那个桶(换新同步 ID 时清孤儿)。
+ * 成功: { ok:true } —— 后端幂等,桶本来就不存在也算成功。
+ * 失败: { ok:false, error }——**调用方可以直接忽略**:删桶是清理,不是用户要的结果,
+ * 失败最坏是留一个孤儿桶,而服务端的 TTL 清扫最终会兜掉它。所以不重试、不提示。
+ */
+export async function syncDelete(origin, userId, { signal } = {}) {
+  try {
+    const url = `${origin}/sync?key=${encodeURIComponent(userId)}`;
+    const { res, network } = await request(url, { method: 'DELETE' }, signal);
+    if (network) return { ok: false, error: 'network' };
+    if (res.status === 429) return { ok: false, error: 'rate' };
+    if (!res.ok) return { ok: false, error: 'unknown' };
+    const data = await res.json();
+    return data && data.ok === true ? { ok: true } : { ok: false, error: 'unknown' };
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+}
+
 /** GET <origin>/health → 探活。{ ok:true } | { ok:false, error:'network'|'unknown' } */
 export async function syncProbe(origin, { signal } = {}) {
   try {

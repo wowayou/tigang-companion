@@ -21,6 +21,7 @@ import { evaluate, unlockedIds, newlyUnlocked, dailyGoal } from './core/achievem
 import { load, save, clearAll, exportJSON, parseBackup, mergeRecords } from './core/storage.js';
 import { newUserId, normalizeUserId, checkPassphrase, MIN_PASSPHRASE_LENGTH, MIN_DIGITS_ONLY_LENGTH } from './core/sync.js';
 import { SyncCoordinator } from './sync/coordinator.mjs';
+import { syncDelete } from './sync/client.mjs';
 
 /* ------------------------------------------------------------------ *
  * DOM 引用
@@ -1553,9 +1554,24 @@ el.btnSyncOverwrite.addEventListener('click', () => {
   void syncCoordinator.overwriteRemote();
 });
 
-/* 换新桶:远端那份就此弃用(留在服务器上但再也不去读),本机换一个全新 ID 重新开始。 */
+/*
+ * 换新桶:本机换一个全新 ID 重新开始,**并删掉旧桶**(否则它永远留在服务器上没人读 —— 孤儿)。
+ *
+ * 为什么删之前要问清楚:如果用户把旧 ID 手填到过别的设备,那个桶是**共享的**。
+ * 删掉之后,另一台设备下次 pull 会拿到 none 然后把自己的本机数据重新推上去 —— 通常能自愈,
+ * 但如果那台设备上有本机没有的记录且它已经不在了(卖了/重装了),那些记录就真没了。
+ * 所以确认框把"删除"说出口,而不是含混地说"不再关联"。
+ *
+ * 删除失败不拦流程:换 ID 是用户要的结果,删桶只是清理,失败最坏留个孤儿,
+ * 服务端 TTL 清扫兜底(见 sync-server ORPHAN_TTL_MS)。
+ */
 el.btnSyncNewId.addEventListener('click', () => {
-  if (!window.confirm('将为本机生成一个全新的同步 ID,原来那份远端数据不再关联。\n\n本机记录不受影响。确定?')) return;
+  if (!window.confirm(
+    '将为本机生成一个全新的同步 ID,并删除服务器上原来那份数据。\n\n'
+    + '本机记录不受影响。但如果你把旧的同步 ID 填到过其他设备,那份数据是共用的 —— 删除后其他设备会重新上传自己的记录。\n\n'
+    + '确定?',
+  )) return;
+  const prevUserId = syncUserId;
   const nextUserId = newUserId();
   try {
     localStorage.setItem(SYNC_USER_KEY, nextUserId);
@@ -1571,6 +1587,9 @@ el.btnSyncNewId.addEventListener('click', () => {
   updateSyncButtonLabel();
   updateSyncControls();
   syncNowState('已换新同步 ID · 点「立即同步」上传本机数据');
+  // 旧桶清理:不走编排器 —— 它的 invalidate() 刚把旧身份的在途请求全 abort 了,
+  // 而这个请求恰恰要用旧身份。不 await、不看结果、不给用户报错(见上面注释)。
+  if (prevUserId && prevUserId !== nextUserId) void syncDelete(SYNC_ORIGIN, prevUserId);
 });
 
 /* ------------------------------------------------------------------ *

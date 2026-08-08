@@ -8,9 +8,18 @@
  *
  * 端点:
  *   OPTIONS *           preflight 短路 204 + CORS
- *   GET  /sync?key=<u>  拉密文  {ok:true,blob} | {ok:false,error:'none'}(无数据)
- *   PUT  /sync?key=<u>  推密文  body {blob}(≤1MB)→ {ok:true};覆盖存储(last-write-wins)
- *   GET  /health        探活    {ok:true}
+ *   GET    /sync?key=<u>  拉密文  {ok:true,blob} | {ok:false,error:'none'}(无数据)
+ *   PUT    /sync?key=<u>  推密文  body {blob}(≤1MB)→ {ok:true};覆盖存储(last-write-wins)
+ *   DELETE /sync?key=<u>  删桶    {ok:true} —— **幂等**:桶不存在也返回 ok
+ *   GET    /health        探活    {ok:true}
+ *
+ * 孤儿桶(两道防线,见 DEVELOPMENT.md D38):
+ *   端到端加密的后端只有密文,分不清一个桶是被弃用了还是主人半年没打开 —— 只能等
+ *   客户端来说,或者按时间兜底。所以两道一起上:
+ *   ① DELETE:用户在设置里「换新同步 ID」时客户端主动删掉旧桶(即时,但只覆盖这一条路径);
+ *   ② TTL 清扫:超过 ORPHAN_TTL_MS 未更新的桶启动时+每天删一次(兜底,不依赖客户端)。
+ *   只有 ② 能把"只增不减"变成有界:清 localStorage / 卸载 PWA / 换手机不迁移
+ *   都不会有人来调 DELETE。
  *
  * 冲突处理:后端不处理,last-write-wins 覆盖;合并由客户端做(拉→解密→mergeForSync→加密→推)。
  *
@@ -48,6 +57,13 @@ const USER_PUT_INTERVAL_MS = 3_000;
 const IP_RATE_WINDOW_MS = 60_000; // 单 IP 限流时间窗
 const IP_RATE_LIMIT = 20; // 时间窗内请求上限
 const MAX_KEY_LEN = 128;
+// 孤儿桶兜底:超过这么久没 PUT 过的桶视为废弃,清扫掉。
+// 180 天是刻意给足的:活跃用户每次同步都会刷新 updated_at,永远碰不到这条线;
+// 真正会被删的是"卸载了/换手机了/清了浏览器数据"的桶。**但这是会删数据的设置**——
+// 抄着 userId+主密码、半年多没开过应用、指望回来从远端恢复的用户会拿不到数据
+// (本机还在的用户不受影响:下次 push 会重新建桶)。要更保守就把这个数字调大。
+const ORPHAN_TTL_MS = Number(process.env.ORPHAN_TTL_MS || 180 * 24 * 60 * 60 * 1000);
+const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 每天扫一次(启动时先扫一次)
 // userId 必须是 UUID(客户端 newUserId() 的产物);任意字符串不许建桶。
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -106,7 +122,7 @@ function logLine(status, ip, req, key) {
 
 const CORS = {
   'Access-Control-Allow-Origin': '*', // 应用无 cookie/凭据,用 * 最简
-  'Access-Control-Allow-Methods': 'GET,PUT,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,PUT,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Max-Age': '86400',
   'Cache-Control': 'no-store', // 密文与 none 响应都不能被浏览器/中间代理缓存
@@ -167,6 +183,33 @@ function handlePutSync(req, res, key) {
   ).run(key, blob, now);
 
   send(res, 200, { ok: true });
+}
+
+/**
+ * 删桶。**故意幂等**:桶不存在也回 {ok:true} ——
+ * ① 客户端拿"成功"当"远端已经没有这份数据了",不存在本来就满足这个后置条件;
+ * ② 不泄露"这个 UUID 存不存在"(虽然要先猜中一个 v4 UUID 才问得出来);
+ * ③ 客户端重试安全(网络超时后重发不会拿到假失败)。
+ *
+ * 不需要额外鉴权:userId 本来就是读写凭据,知道它的人已经能 PUT 覆盖整个桶了,
+ * DELETE 不扩大攻击面(这也正是主密码必须与 userId 分开的原因,见 D35)。
+ */
+function handleDeleteSync(res, key) {
+  db.prepare('DELETE FROM blobs WHERE user_id = ?').run(key);
+  send(res, 200, { ok: true });
+}
+
+/* ---------------- 孤儿桶清扫(TTL 兜底) ---------------- */
+
+function sweepOrphans(now = Date.now()) {
+  const cutoff = now - ORPHAN_TTL_MS;
+  const info = db.prepare('DELETE FROM blobs WHERE updated_at < ?').run(cutoff);
+  const removed = Number(info.changes || 0);
+  // 只记条数,不记 userId:清扫是批量操作,逐个打 key 等于把一批凭据写进 journal。
+  if (removed > 0) {
+    console.log(`${new Date().toISOString()} sweep removed=${removed} ttl_days=${Math.round(ORPHAN_TTL_MS / 86400000)}`);
+  }
+  return removed;
 }
 
 /* ---------------- body 读取(带 1MB 上限) ---------------- */
@@ -253,6 +296,11 @@ const server = createServer((req, res) => {
       });
       return;
     }
+    if (req.method === 'DELETE') {
+      logLine(200, ip, req, key);
+      handleDeleteSync(res, key);
+      return;
+    }
     send(res, 405, { ok: false, error: 'method' });
     return;
   }
@@ -262,4 +310,7 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`sync-server listening on http://${HOST}:${PORT} (db: ${DB_PATH})`);
+  // 启动时先扫一次,之后每天一次。unref():清扫定时器不该成为进程存活的理由。
+  sweepOrphans();
+  setInterval(sweepOrphans, SWEEP_INTERVAL_MS).unref();
 });

@@ -267,7 +267,7 @@ export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
   ```js
   const SYNC_ORIGIN = 'https://sync.eigentime.org'; // 自建甲骨文后端;换后端(未来回 Worker / 本地开发)改这一行
   ```
-- **后端契约**:见 `sync-server/README.md`(不进 SPEC 主体——SPEC 是前端契约)。端点 `PUT/GET /sync?key=<userId>`、`GET /health`;只存取密文字符串,last-write-wins 覆盖;**userId 必须为 UUID v4 格式**(前后端双向校验,预防手填时误入非 UUID 建垃圾桶);限流 同 userId PUT ≥ 1次/3s → 429 + 同 IP 20次/分 → 429(多设备共用同一 userId 时共享这个额度,客户端撞 429 会**自动延后重试一次**)。
+- **后端契约**:见 `sync-server/README.md`(不进 SPEC 主体——SPEC 是前端契约)。端点 `PUT/GET/DELETE /sync?key=<userId>`、`GET /health`(`DELETE` **幂等**,桶不存在也回 `{ok:true}`;客户端只在「换新同步 ID」时调,`syncDelete` 失败静默——孤儿由服务端 TTL 清扫兜底);只存取密文字符串,last-write-wins 覆盖;**userId 必须为 UUID v4 格式**(前后端双向校验,预防手填时误入非 UUID 建垃圾桶);限流 同 userId PUT ≥ 1次/3s → 429 + 同 IP 20次/分 → 429(多设备共用同一 userId 时共享这个额度,客户端撞 429 会**自动延后重试一次**)。
 - **纯函数层**(`core/sync.js`,可迁移到 time-logger):
   - `encryptBlob(plaintextObj, passphrase, crypto=globalThis.crypto)` → `{v:1,salt,iv,ct,iter}`(PBKDF2-SHA256 200000 轮 + AES-GCM-256)。
   - `decryptBlob(blob, passphrase, crypto)` → `{ok:true,data} | {ok:false,error}`;错误主密码 / 损坏密文 → `{ok:false}` **不抛**(调用方静默降级纯本地)。

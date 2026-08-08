@@ -290,6 +290,13 @@
     </button>
   </nav>
 
+  <!--
+    轻通知位:有新版本 / 离线与恢复 / 撤销清除 / 成功反馈共用这一个位置(见 app.js showToast)。
+    训练进行中不插入任何内容,回到空闲态再补发 —— 跟着节奏收缩时被横幅打断,比不提示更糟。
+    aria-live 容器必须一开始就在 DOM 里,后插入的子节点才会被读屏播报。
+  -->
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
   <dialog class="dlg" id="dlg-settings" aria-label="设置">
     <h2 class="dlg-title">设置</h2>
 

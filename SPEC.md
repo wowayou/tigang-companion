@@ -325,7 +325,7 @@ sync-client.test.mjs 至少覆盖:GET `cache:no-store`、外部 AbortSignal 可�
 
 sync-coordinator.test.mjs 至少覆盖:拉取失败不 PUT、解密失败锁住自动同步、ID/密码切换让旧 pull/encrypt/timer 失效、防抖执行完整流水线、限流重试重新 GET、同步中本地再变化会 rerun、上传使用深快照。
 
-contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖图全部进入 Service Worker 预缓存、响应式圆尺寸方向、systemd/docker0 部署地址一致。
+contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖图全部进入 Service Worker 预缓存、响应式圆尺寸方向、systemd/docker0 部署地址一致、进度环三层结构(环不得成为圆的父元素,否则被 mask 裁掉)、引导圆是 button 且点击转发到按钮、主密码强度门槛在 UI 真的生效、后端与 nginx 都不把 userId 写进日志、**SW 更新必须用户触发**(install 里不得有 `skipWaiting`;`controllerchange` 只在用户点过更新后 reload)、训练中 toast 入队与空闲态补发、破坏性操作提供撤销且不恢复同步身份、弹窗开着时 toast 挂进弹窗。
 
 ## §8 UI 规格(index.html + styles.css + app.js)
 
@@ -459,6 +459,28 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 | 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `reminder-time-row` `opt-reminder-time` `btn-sync-entry` `sync-entry-state` |
 | 同步弹窗(二级) | `dlg-sync` `opt-sync-enabled` `opt-sync-master` `sync-pass-hint` `opt-sync-user` `btn-sync-copy` `opt-sync-link` `btn-sync-link` `btn-sync-now` `sync-last` `sync-state` `sync-recover` `btn-sync-overwrite` `btn-sync-new-id` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
+| 通知位 | `toasts`(容器,`aria-live="polite"`;条目由 JS 建,无固定 id,靠 `data-toast-id` 去重) |
+
+### §8.y 统一通知位(toast)
+
+`#toasts` 固定在 tabbar 上方(`z-index:9` < tabbar 的 10:导航永不被盖)。四类场景共用,不再各写各的:
+
+| 场景 | id | 类型 |
+|---|---|---|
+| 新版本就绪(「有新版本可用 · 更新」) | `sw-update` | sticky + 动作 |
+| 清除数据 / 导入替换(「· 撤销」) | `cleared` / `import` | sticky + 动作 |
+| 解密失败(「同步已暂停 · 处理」) | `sync-decrypt` | sticky + 动作 |
+| 掉线 / 恢复联网 | `net` | 自动消失 |
+| 复制同步 ID / 导出备份 / 合并导入 | `copied` / `export` / `import` | 自动消失 |
+
+掉线提示**只给开了同步的用户**:纯本地用户断网时应用照常工作,提示"离线"纯属制造焦虑(数据本来就不出设备)。`kind` 只染左侧 3px 竖线(`--teal`/`--flame`/`--danger`),不染整卡 —— 通知会连着出现,整卡染色会让界面看起来在闪。
+
+硬约束:
+
+1. **训练中不打扰**:`isRunning(session)` 为真时 toast 入队不显示,`renderTrain()` 回到空闲态才 `flushToastQueue()`。与 R5 计数徽标同一条规矩——正在跟节奏收缩时弹横幅比不提示更糟。
+2. **top layer**:`showModal()` 的 `<dialog>` 在 top layer,任何 z-index 都盖不过它 → 弹窗打开时 toast 必须挂到该 dialog 内部(`toastMount()` 检测 `dialog[open]`,容器加 `.toasts--in-dialog` 退回 `position:static`,插在 sticky 的 `.dlg-actions` 之前),否则弹窗里触发的「已复制」「同步已暂停」用户根本看不见。dialog `close` 时把**带动作按钮的** toast 搬回页面容器(它们不该随弹窗消失),纯提示则丢弃。
+3. **`data-toast-id` 去重**:同 id 只留一条(先 dismiss 旧的再插新的),掉线/恢复反复触发不会叠成一摞;查找用 `document.querySelector` 而非只查页面容器 —— 目标可能挂在弹窗内。
+4. **撤销**:清除/替换前留内存快照(`records` 浅拷贝 + `settings` 展开),撤销 = 写回快照。**快照只在内存里,刷新即失效**,所以撤销 toast 是 sticky 的;持久兜底仍是「导出备份」,不在这里做持久化。撤销**故意不恢复同步身份**:清除时主密码已丢,只恢复 userId 会让编排器拿半套身份打后端,破坏「任何 PUT 前同身份 GET 成功」的不变量 —— 恢复 userId 值方便复用,但 `sync.enabled` 强制置 false,由用户重新输主密码开启。
 
 ### §8.z 全站计数(空闲态紧凑徽标:此刻在做人数 + 总访问)
 
@@ -478,8 +500,9 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 - icon.svg:teal 圆底 + 白色三层同心收缩圆环示意(简洁即可,不要文字)。**根因(为什么还要额外做 PNG)**:iOS Safari 不支持 SVG 格式的 `apple-touch-icon`,只声明 icon.svg 会导致 iOS 添加到主屏时图标退化成系统生成的文字缩写(本项目退化成"提"字)。
 - icon-180.png / icon-192.png / icon-512.png / icon-maskable-512.png:`tools/make-icons.mjs` 生成,零依赖(只用 Node 内置 `zlib` + `Buffer`,手写 PNG 编码器:CRC32/IHDR/IDAT/IEND + 自行光栅化 + 4×4 超采样抗锯齿),产物 PNG **直接提交进仓库**(项目无构建步骤,不能指望部署时现生成)。`icon-180.png` 是 iOS `apple-touch-icon`,方形满铺不留透明角(iOS 会自己裁成圆角,留透明角会露黑底);`icon-maskable-512.png` 内容仅占中心 60% 区域(maskable 安全区,避免被系统蒙版裁掉视觉元素)。改图标设计需重跑 `node tools/make-icons.mjs` 并提交新 PNG。
 - index.html:`<link rel="apple-touch-icon" href="icon-180.png" sizes="180x180">`(而非 icon.svg)。
-- sw.js:`CACHE_NAME='tigang-v17'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index/styles/app/manifest/sw + core/ 五个模块 + `sync/client.mjs` + `sync/coordinator.mjs` + 图标,相对路径 `./` 开头)+ `skipWaiting`;activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
-- app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。
+- sw.js:`CACHE_NAME='tigang-v19'`(发版递增);install → `addAll` 预缓存 `PRECACHE_URLS`(index/styles/app/manifest/sw + core/ 五个模块 + `sync/client.mjs` + `sync/coordinator.mjs` + 图标,相对路径 `./` 开头);activate → 清旧 cache + `clients.claim`;fetch → 仅处理同源 GET,cache-first 回退 network。**`PRECACHE_URLS` 同时是 `tools/build-site.mjs` 的运行时清单单一真源**,改预缓存清单要两侧同步。
+- **install 里故意不调 `skipWaiting()`**(v18 及之前无条件调用,是个错):新 SW 立刻接管并删掉旧 `CACHE_NAME` 的缓存,但已打开的页面仍在跑内存里的旧 JS —— 旧页面此后任何未缓存的请求都落到新缓存上,资产版本不自洽,且用户完全不知道该刷新。现在新版本装好后停在 **waiting**,由页面横幅上的「更新」按钮 `postMessage({type:'skip-waiting'})` 触发;sw.js 的 `message` 处理器收到才 `self.skipWaiting()`。这样「换版本」永远是用户点出来的一次显式动作。
+- app.js 末尾:`if ('serviceWorker' in navigator)` load 后 `register('./sw.js')`,try/catch 静默失败(http 下无 SW 属正常)。注册后接更新流水线:`updatefound` → 新 worker `statechange` 到 `installed` 且 `navigator.serviceWorker.controller` 存在(有 controller 才说明是**更新**而非首次安装,首装不该提示)→ 弹 sticky 更新 toast;点「更新」→ postMessage → 监听 `controllerchange` 一次性 `location.reload()`。另 `visibilitychange` 回到前台时 `reg.update()` 探一次 —— 装到主屏的 PWA 可能连着几天不重启,不主动探就发现不了新版本。上次弹过没点、直接关掉的情况:重开时若 `reg.waiting` 仍在且有 controller,补弹一次。
 
 ## §10 验收清单(由主会话执行)
 
@@ -547,5 +570,12 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
     - **设置精简**:七个开关平铺 + 常驻同步区块要滚两屏 → 分三组(声音/提醒/同步)、同步折叠成单行入口 `#btn-sync-entry` + 二级 `#dlg-sync`(砍掉六成高度)、提醒时间行随开关 hidden、轻提示降为提示音子项(与其 `disabled` 约束对齐)、说明文字下沉到各自开关旁。
     - **训练页**:条形 `#overall-bar` → 圆周进度环 `#coach-ring`(三层 `grid-area:1/1` 叠层,环不能当圆的父元素否则被 mask 裁掉);圆改 `<button>` 可点(手势内调用语音/AudioContext 依旧成立);空闲态 `—` → `▶` 字形、进度环留白、按钮按状态出(空闲整宽「开始」);全局 `-webkit-tap-highlight-color: transparent` 消掉安卓蓝框。
     - **为什么有了 UUID 还要主密码**(结论写进 `core/sync.js` 顶部注释):userId 是**会流动的寻址凭据**(要跨设备复制、出现在 URL query 与 localStorage 明文里),会被到处复制的东西不能同时当解密钥匙;主密码是唯一不上网的那一半,「后端只见密文」「ID 泄露最多被覆盖、读不出明文」两句承诺全靠它。
+
+21. **升级提示 + 统一轻通知位(2026-08-08,`CACHE_NAME` → `tigang-v19`)**:
+    - **SW 更新流程反转**(修一个静默 bug):v18 及之前 install 里无条件 `skipWaiting()` —— 新 SW 立刻接管并删旧缓存,但已打开的页面还在跑内存里的旧 JS,资产版本不自洽,且用户完全不知道该刷新(v18 的进度环与主密码下限就这样卡在老用户手里)。改为停在 waiting → 页面弹 sticky 横幅 → 用户点「更新」→ postMessage → `skipWaiting` → `controllerchange` → reload。**两个坑写进测试**:① install 里不得再出现 `skipWaiting`;② `controllerchange` 必须用 `updateRequested` 标志判别,否则首装时 `clients.claim()` 也会触发,每个新用户进来白刷一次。另加 `visibilitychange` 时 `reg.update()`(主屏 PWA 可能几天不重启)。
+    - **统一通知位 `#toasts`**(§8.y):把四类「状态变了但用户不知道」收到一处——新版本、掉线/恢复、清除与替换的撤销、复制/导出成功。原先分别靠 `alert`(打断)、设置弹窗里一行状态字(视线不在那儿)、或什么都不做。两条硬约束:**训练中入队不显示**(与 R5 计数徽标同一取舍,补发点在 `renderTrain()`——唯一覆盖所有"回到空闲"路径的汇合点)、**弹窗开着挂进弹窗**(`showModal()` 的 dialog 在 top layer,z-index 再高也被遮罩压住)。
+    - **破坏性操作给撤销**:清除数据、导入「替换」都是不可逆整体覆盖,连续打卡是几十天攒的。快照只在内存(刷新即失效),撤销**不恢复同步身份**——清除时主密码已丢,只恢复 userId 会让编排器拿半套身份打后端。
+    - **解密失败改为主动提示**:同步多在后台跑,弹窗关着时状态行没人看得见,而它会让同步永久停摆到用户处理为止;弹窗开着则不弹,不说两遍。
+    - 导入的两个 `window.alert` 一并换成 toast(同类问题:打断式反馈)。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

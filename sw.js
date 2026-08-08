@@ -1,6 +1,6 @@
 /* 提肛陪伴 — Service Worker(离线优先,零依赖) */
 
-const CACHE_NAME = 'tigang-v18';
+const CACHE_NAME = 'tigang-v19';
 
 const PRECACHE_URLS = [
   './',
@@ -23,13 +23,23 @@ const PRECACHE_URLS = [
   './icon-maskable-512.png',
 ];
 
+/*
+ * 注意这里**故意不调** skipWaiting:新版本装好后停在 waiting,由页面上的
+ * 「有新版本 · 更新」提示按钮 postMessage 过来才接管(见下面的 message 监听)。
+ *
+ * 为什么不能无条件 skipWaiting(v18 及之前就是这么写的,是个错):
+ * 新 SW 立刻 activate 并删掉旧缓存,但已打开的页面还在跑内存里的旧 app.js。
+ * 旧代码此后去取任何没缓存过的资源,拿到的都是新版本的文件 —— 版本被劈成两半。
+ * 而且用户完全不知道该刷新,老版本能挂好几天(v18 的进度环和主密码下限就是这样卡住的)。
+ * 现在的次序反过来:先告诉用户,用户点了才切,切完立刻 reload,页面与资产始终同版本。
+ */
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_NAME)
-      .then((cache) => cache.addAll(PRECACHE_URLS))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS)));
+});
+
+/** 页面点了「更新」才走到这里:接管 → 触发 controllerchange → 页面自己 reload。 */
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'skip-waiting') self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {

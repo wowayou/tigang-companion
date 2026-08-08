@@ -125,6 +125,8 @@ const el = {
   syncRecover: $('sync-recover'),
   btnSyncOverwrite: $('btn-sync-overwrite'),
   btnSyncNewId: $('btn-sync-new-id'),
+
+  toasts: $('toasts'),
 };
 
 const presetRadios = Array.from(document.querySelectorAll('input[name="preset"]'));
@@ -232,6 +234,141 @@ function persist() {
   save(data);
   // 数据变了 → 防抖后执行完整 pull→merge→push;从不直接盲推远端。
   if (syncCoordinator) syncCoordinator.schedule();
+}
+
+/* ------------------------------------------------------------------ *
+ * 轻通知(toast)
+ *
+ * 存在的理由:这个应用有一批「状态变了但用户看不见」的时刻 —— 装好了新版本、
+ * 掉线了、刚清掉数据、刚复制了同步 ID。以前它们分别靠 alert(打断)、
+ * 设置里的一行小字(用户视线不在那儿)、或者什么都不做。统一收到这里。
+ *
+ * 两条硬规矩:
+ * ① 训练进行中不显示,排队等回到空闲态 —— 跟 R5 的计数徽标同一个取舍(零打扰)。
+ * ② 同 id 只留一条:掉线/恢复反复触发时不该在屏幕上叠成一摞。
+ * ------------------------------------------------------------------ */
+
+const TOAST_MAX = 3;
+const TOAST_DEFAULT_MS = 3400;
+
+/** 训练中被拦下的通知(按 id 去重),回到空闲态后按序补发。 */
+let toastQueue = [];
+
+function toastsBlocked() {
+  return isRunning(session) && !session.paused;
+}
+
+/**
+ * 通知该挂到哪儿。
+ *
+ * `showModal()` 打开的 `<dialog>` 会进入 **top layer** —— 它在所有 z-index 之上,
+ * 页面里那个 `position:fixed` 的 `.toasts` 无论调到多少都会被压在遮罩下面。
+ * 而「已复制同步 ID」「同步已暂停」恰好都是在弹窗开着时触发的,挂错地方 = 用户根本看不见。
+ * 所以有弹窗开着就把通知挂进那个弹窗自己的容器里。
+ */
+function toastMount() {
+  const dlg = document.querySelector('dialog[open]');
+  if (!dlg) return el.toasts;
+  let inner = dlg.querySelector('.toasts');
+  if (!inner) {
+    inner = document.createElement('div');
+    inner.className = 'toasts toasts--in-dialog';
+    inner.setAttribute('role', 'status');
+    inner.setAttribute('aria-live', 'polite');
+    // 插在底部操作条之前:那条是 sticky 的,通知排在它后面会被压在按钮下方
+    const actions = dlg.querySelector('.dlg-actions');
+    if (actions) dlg.insertBefore(inner, actions);
+    else dlg.appendChild(inner);
+  }
+  return inner;
+}
+
+/**
+ * 显示一条轻通知。
+ * @param {{id?:string, text:string, kind?:'info'|'ok'|'warn'|'err',
+ *          actionLabel?:string, onAction?:Function, sticky?:boolean,
+ *          duration?:number, urgent?:boolean}} opts
+ *   sticky = 不自动消失(带撤销/更新按钮的用这个,给一个 × 手动关)。
+ *   urgent = 无视训练中拦截(目前只有「解密失败」这类需要立刻知道的用)。
+ */
+function showToast(opts) {
+  if (!el.toasts) return;                       // 老缓存的 index.html 里没有这个容器
+  const t = { kind: 'info', ...opts };
+  if (!t.text) return;
+
+  if (toastsBlocked() && !t.urgent) {
+    if (t.id) toastQueue = toastQueue.filter((q) => q.id !== t.id);
+    toastQueue.push(t);
+    return;
+  }
+
+  const mount = toastMount();
+  if (t.id) dismissToast(document.querySelector(`[data-toast-id="${cssEscape(t.id)}"]`));
+
+  const node = document.createElement('div');
+  node.className = `toast toast--${t.kind}`;
+  if (t.id) node.dataset.toastId = t.id;
+
+  const text = document.createElement('span');
+  text.className = 'toast-text';
+  text.textContent = t.text;
+  node.appendChild(text);
+
+  if (t.actionLabel && typeof t.onAction === 'function') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast-action';
+    btn.textContent = t.actionLabel;
+    btn.addEventListener('click', () => {
+      dismissToast(node);
+      t.onAction();
+    });
+    node.appendChild(btn);
+  }
+
+  if (t.sticky) {
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', '关闭提示');
+    close.textContent = '×';
+    close.addEventListener('click', () => dismissToast(node));
+    node.appendChild(close);
+  }
+
+  mount.appendChild(node);
+
+  // 超出上限先清最老的,避免通知把训练区盖掉
+  while (mount.children.length > TOAST_MAX) dismissToast(mount.firstElementChild);
+
+  if (!t.sticky) {
+    const ms = typeof t.duration === 'number' ? t.duration : TOAST_DEFAULT_MS;
+    setTimeout(() => dismissToast(node), ms);
+  }
+  return node;
+}
+
+function dismissToast(node) {
+  if (!node || !node.parentNode || node.classList.contains('is-leaving')) return;
+  node.classList.add('is-leaving');
+  // 动画结束再摘;减弱动效时动画被关掉,animationend 不会触发 → 用兜底定时器
+  const remove = () => node.remove();
+  node.addEventListener('animationend', remove, { once: true });
+  setTimeout(remove, 220);
+}
+
+/** 回到空闲态时补发训练中被拦下的通知。 */
+function flushToastQueue() {
+  if (!toastQueue.length || toastsBlocked()) return;
+  const pending = toastQueue;
+  toastQueue = [];
+  pending.forEach((t) => showToast(t));
+}
+
+/** CSS.escape 的兜底:同步 ID 之外的 toast id 都是自己写死的字面量,够用。 */
+function cssEscape(s) {
+  if (window.CSS && typeof window.CSS.escape === 'function') return window.CSS.escape(s);
+  return String(s).replace(/["\\]/g, '\\$&');
 }
 
 /* ------------------------------------------------------------------ *
@@ -618,6 +755,10 @@ function renderTrain() {
   customInputs.forEach((i) => { i.disabled = running; });
   el.optHoldEnabled.disabled = running;
   el.cfgHold.disabled = running;
+
+  // 训练中被拦下的通知在这里补发:renderTrain 是唯一能覆盖所有「回到空闲」路径的汇合点
+  // (自然完成 / 手动结束 / 暂停),各处分别调用早晚会漏掉一条。
+  if (!toastsBlocked()) flushToastQueue();
 }
 
 function renderStats() {
@@ -1245,15 +1386,45 @@ el.optReminderTime.addEventListener('change', () => {
 
 /* 设置里的「多端同步」一行 → 打开二级弹窗。同步 UI 从主设置搬到这里,主设置回到 6 行以内。 */
 el.btnSyncEntry.addEventListener('click', () => {
+  openSyncDialog();
+});
+
+/** 打开同步弹窗(设置里那一行、以及故障 toast 的「处理」按钮共用)。 */
+function openSyncDialog() {
   renderSettingsForm();
   if (typeof el.dlgSync.showModal === 'function') el.dlgSync.showModal();
   else el.dlgSync.setAttribute('open', '');
-});
+}
 
 // 二级弹窗关闭后刷新摘要行(可能刚开/关了同步)
 el.dlgSync.addEventListener('close', () => {
   renderSyncEntry();
 });
+
+/*
+ * 弹窗关闭时,把里面还没读的常驻通知(更新提示、撤销)搬回页面上 ——
+ * 它们本来就不该随弹窗一起消失。非常驻的(几秒自动消失那种)直接丢掉,搬出来反而突然。
+ */
+for (const dlg of document.querySelectorAll('dialog')) {
+  dlg.addEventListener('close', () => {
+    const inner = dlg.querySelector('.toasts');
+    if (!inner || !el.toasts) return;
+    for (const node of [...inner.children]) {
+      if (!node.querySelector('.toast-action')) {
+        node.remove(); // 纯提示不搬,搬出来反而突然
+        continue;
+      }
+      // 搬之前先清掉页面上同 id 的旧条目,否则会出现两条一样的
+      const id = node.dataset.toastId;
+      if (id) {
+        const dup = el.toasts.querySelector(`[data-toast-id="${cssEscape(id)}"]`);
+        if (dup && dup !== node) dup.remove();
+      }
+      el.toasts.appendChild(node);
+    }
+    while (el.toasts.children.length > TOAST_MAX) dismissToast(el.toasts.firstElementChild);
+  });
+}
 
 /* 同步开关:只改 settings.sync.enabled(主密码/userId 都不进 settings)。开=展开主密码组并聚焦;关=清主密码(内存 + sessionStorage)。 */
 el.optSyncEnabled.addEventListener('change', () => {
@@ -1317,6 +1488,8 @@ el.btnSyncCopy.addEventListener('click', () => {
   if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
     navigator.clipboard.writeText(el.optSyncUser.value).then(() => {
       syncNowState('已复制,粘贴到另一台设备即可');
+      // 状态行在弹窗深处,用户点完按钮视线还在按钮上 —— toast 才是他真能看见的反馈
+      showToast({ id: 'copied', kind: 'ok', text: '同步 ID 已复制' });
     }).catch(() => {
       selectAndHint();
     });
@@ -1327,6 +1500,7 @@ el.btnSyncCopy.addEventListener('click', () => {
     el.optSyncUser.select();
     el.optSyncUser.setSelectionRange(0, 99999);
     syncNowState('请手动复制(Ctrl+C),粘贴到另一台设备');
+    showToast({ id: 'copied', kind: 'warn', text: '无法自动复制,已选中,请手动复制' });
   }
 });
 
@@ -1461,7 +1635,7 @@ el.btnExport.addEventListener('click', () => {
   }
   if (file && isIOSDevice() && navigator.canShare && navigator.canShare({ files: [file] })) {
     navigator.share({ files: [file], title: fname }).catch(() => {});
-    return;
+    return; // 系统分享面板自带反馈,不再叠 toast
   }
   const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -1472,10 +1646,19 @@ el.btnExport.addEventListener('click', () => {
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // 桌面/安卓下载常常静默完成,只在通知栏一闪 —— 明确说一声存了什么
+  showToast({ id: 'export', kind: 'ok', text: `已导出 ${data.records.length} 天记录 · ${fname}` });
 });
 
 el.btnClear.addEventListener('click', () => {
   if (!window.confirm('确定清除本机数据?打卡记录、设置与本机同步关联都会删除。服务器上既有密文不会自动删除。')) return;
+
+  // 清除前留一份内存快照,给一个撤销窗口:连续打卡是几十天攒出来的,
+  // 手滑一下就没了太重。快照只在内存里,刷新即失效(所以撤销 toast 是常驻的,
+  // 但用户一旦离开页面就真的没了 —— 这点由「导出备份」兜底,不在这里做持久化)。
+  const snapshot = { records: data.records.slice(), settings: { ...data.settings } };
+  const prevUserId = syncUserId;
+
   // 先让旧同步上下文失效,否则清除时仍在途的 pull/push 可能随后把数据写回来。
   if (syncCoordinator) syncCoordinator.invalidate();
   if (!clearAll()) {
@@ -1498,7 +1681,44 @@ el.btnClear.addEventListener('click', () => {
   scheduleReminder();
   resetSession();
   renderStats();
+
+  showToast({
+    id: 'cleared',
+    kind: 'warn',
+    sticky: true,
+    text: `已清除 ${snapshot.records.length} 天记录`,
+    actionLabel: '撤销',
+    onAction: () => restoreSnapshot(snapshot, prevUserId),
+  });
 });
+
+/**
+ * 把清除前的快照写回本机。同步身份**故意不恢复**:
+ * 清除时已经 configure({enabled:false}) 并丢掉了主密码,恢复 userId 却没有主密码
+ * 只会让编排器拿着半套身份去打后端。恢复 ID 值方便用户复用,但同步保持关闭,
+ * 由用户自己重新输主密码开启 —— 这条守住「任何 PUT 前同身份 GET 成功」的不变量。
+ */
+function restoreSnapshot(snapshot, prevUserId) {
+  data = { records: snapshot.records, settings: { ...snapshot.settings } };
+  data.settings.sync = { ...data.settings.sync, enabled: false };
+  save(data);
+  if (prevUserId) {
+    syncUserId = prevUserId;
+    try {
+      localStorage.setItem(SYNC_USER_KEY, prevUserId);
+    } catch {
+      /* 存不回去也不影响本机数据;用户可在设置里重新生成 */
+    }
+  }
+  lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
+  renderPresetForm();
+  renderSettingsForm();
+  renderSyncEntry();
+  scheduleReminder();
+  resetSession();
+  renderStats();
+  showToast({ kind: 'ok', text: '已恢复;同步保持关闭,需要的话重新输入主密码开启' });
+}
 
 /* ------------------------------------------------------------------ *
  * 事件:数据导入(合并 / 替换)
@@ -1547,12 +1767,19 @@ el.importMerge.addEventListener('click', () => {
   persist();
   el.dlgImport.close();
   afterDataImport();
-  window.alert(`已合并 ${data.records.length - before} 条新记录。`);
+  const added = data.records.length - before;
+  showToast({
+    id: 'import',
+    kind: 'ok',
+    text: added > 0 ? `已合并 ${added} 条新记录` : '备份里没有本机缺少的记录',
+  });
 });
 
 el.importReplace.addEventListener('click', () => {
   const backup = pendingImport;
   if (!backup) return;
+  const snapshot = { records: data.records.slice(), settings: { ...data.settings } };
+  const prevUserId = syncUserId;
   data = { records: backup.records, settings: backup.settings };
   lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
   // 替换会改变 settings.sync.enabled;在 persist() 之前先同步编排器状态,避免沿用旧身份策略排任务。
@@ -1568,7 +1795,15 @@ el.importReplace.addEventListener('click', () => {
   persist();
   el.dlgImport.close();
   afterDataImport();
-  window.alert(`已用备份替换本地数据(共 ${data.records.length} 条记录)。`);
+  // 「替换」和「清除」一样是不可逆的整体覆盖,给同一个撤销窗口
+  showToast({
+    id: 'import',
+    kind: 'warn',
+    sticky: true,
+    text: `已替换为备份数据(${data.records.length} 天)`,
+    actionLabel: '撤销',
+    onAction: () => restoreSnapshot(snapshot, prevUserId),
+  });
 });
 
 el.importCancel.addEventListener('click', () => {
@@ -1862,6 +2097,26 @@ function updateSyncControls(busy = syncUiBusy) {
 /** 解密失败的出路块:只在真的解不开时出现,平时不制造噪音。 */
 function showSyncRecover(show) {
   if (el.syncRecover) el.syncRecover.hidden = !show;
+  if (!show) {
+    // 同步通了就把故障提示收掉 —— 它是 sticky 的,不自己消失
+    // 全文档找:这条可能挂在页面上,也可能挂在同步弹窗内(见 toastMount)
+    dismissToast(document.querySelector('[data-toast-id="sync-decrypt"]'));
+    toastQueue = toastQueue.filter((t) => t.id !== 'sync-decrypt');
+    return;
+  }
+  // 同步大多在后台跑(开应用时、记录变化后),弹窗关着时状态行没人看得见。
+  // 解密失败会让同步**永久停摆**直到用户处理,这是少数值得打断的后台故障。
+  // 弹窗开着就不弹:状态行已经说了,别说两遍。
+  if (el.dlgSync && !el.dlgSync.open) {
+    showToast({
+      id: 'sync-decrypt',
+      kind: 'warn',
+      sticky: true,
+      text: '同步已暂停:主密码与云端数据不符',
+      actionLabel: '处理',
+      onAction: () => openSyncDialog(),
+    });
+  }
 }
 
 function formatSyncTime(t) {
@@ -1978,6 +2233,23 @@ function syncOnOpen() {
   void syncCoordinator.syncNow({ source: 'open' });
 }
 
+/*
+ * 掉线/恢复提示。只对**开了同步**的用户有意义:纯本地用户断网时应用照常工作,
+ * 跟他说「离线」纯属制造焦虑(数据本来就不出设备)。
+ * 开了同步的用户则需要知道「这段时间的记录还没同步上去」,否则会以为已经同步了。
+ */
+window.addEventListener('offline', () => {
+  if (!syncEnabled()) return;
+  showToast({ id: 'net', kind: 'warn', text: '已离线 · 记录照常保存在本机,联网后会自动同步' });
+});
+
+window.addEventListener('online', () => {
+  if (!syncEnabled()) return;
+  showToast({ id: 'net', kind: 'ok', text: '已恢复联网' });
+  // 断网期间攒下的本地变化在这里补一次完整流水线(仍是 pull→merge→push,不盲推)
+  if (passphraseUsable()) void syncCoordinator?.syncNow({ source: 'online' });
+});
+
 /* ------------------------------------------------------------------ *
  * 初始化
  * ------------------------------------------------------------------ */
@@ -1998,14 +2270,66 @@ syncOnOpen();    // 多端同步:启用且主密码可用(sessionStorage 回填)
 
 /* ------------------------------------------------------------------ *
  * Service Worker(http:// 或不支持时静默失败)
+ *
+ * 更新流程:新 SW 装好后停在 waiting(sw.js 不再无条件 skipWaiting)→ 这里弹一条
+ * 常驻 toast → 用户点「更新」→ postMessage 让它接管 → controllerchange → reload。
+ * 训练中 toast 会自动排队,练完才提示(showToast 内置)。
  * ------------------------------------------------------------------ */
 
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
+  let updateRequested = false; // 只有用户点过「更新」才允许自动 reload
+  let updatePrompted = false;  // 同一个 waiting worker 不重复弹
+
+  const promptUpdate = (worker) => {
+    if (!worker || updatePrompted) return;
+    updatePrompted = true;
+    showToast({
+      id: 'sw-update',
+      kind: 'ok',
+      sticky: true, // 常驻:错过一次就要等下次启动,不能几秒后自己消失
+      text: '有新版本可用',
+      actionLabel: '更新',
+      onAction: () => {
+        updateRequested = true;
+        worker.postMessage({ type: 'skip-waiting' });
+      },
+    });
+  };
+
+  window.addEventListener('load', async () => {
+    let reg;
     try {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+      reg = await navigator.serviceWorker.register('./sw.js');
     } catch {
-      /* 忽略 */
+      return; // http:// 或不支持:静默降级,不影响任何功能
     }
+    if (!reg) return;
+
+    // 上次弹了没点、直接关掉的情况:worker 还停在 waiting,重开时补提示
+    if (reg.waiting && navigator.serviceWorker.controller) promptUpdate(reg.waiting);
+
+    reg.addEventListener('updatefound', () => {
+      const installing = reg.installing;
+      if (!installing) return;
+      installing.addEventListener('statechange', () => {
+        // 有 controller 才说明这是「更新」;首次安装没有 controller,不该提示
+        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+          promptUpdate(installing);
+        }
+      });
+    });
+
+    // 装到主屏的 PWA 可能连着几天不重启,切回前台时主动查一次新版本
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  });
+
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // 首次安装时 clients.claim() 也会触发这个事件 —— 那次绝不能 reload,
+    // 否则每个新用户一进来就白刷一次。只认用户主动点过更新的那次。
+    if (!updateRequested) return;
+    updateRequested = false;
+    window.location.reload();
   });
 }

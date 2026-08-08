@@ -1248,9 +1248,112 @@ body {
 
 .dlg-actions .btn { flex: 1; }
 
+/* ---------------- 轻通知(toast) ---------------- */
+
+/*
+ * 四类「状态变了但用户不知道」共用这一个位置:有新版本、离线/恢复、撤销清除、成功反馈。
+ * 放在 tabbar 上方而不是顶部:顶部有计数徽标和设置齿轮,再叠一层会把首屏压塌;
+ * 底部离拇指近,「撤销 / 更新」这类要点的按钮才够得着。
+ */
+.toasts {
+  position: fixed;
+  left: 0;
+  right: 0;
+  /* 坐在 tabbar 之上;tabbar 自己还要加安全区,所以这里要把两者都算进来 */
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 9;               /* 低于 tabbar(10):导航永远不该被通知盖住 */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 0 14px;
+  /* 容器铺满整宽却必须让点击穿透到下面的内容,只有卡片本身接收事件 */
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px 11px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text);
+  animation: toast-in .22s ease-out both;
+}
+
+.toast.is-leaving { animation: toast-out .16s ease-in both; }
+
+/*
+ * 弹窗里的通知容器:`showModal()` 的 dialog 进入 top layer,页面上那个 fixed 容器
+ * 会被遮罩压住(z-index 再高也没用)。所以弹窗开着时通知挂进弹窗内部,
+ * 这里把定位退回普通文档流。
+ */
+.toasts--in-dialog {
+  position: static;
+  padding: 0;
+  margin: 12px 0 0;
+  max-width: none;
+}
+
+.toast-text { flex: 1; min-width: 0; }
+
+.toast-action {
+  flex: none;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--teal-soft);
+  color: var(--teal-dark);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.toast-action:active { background: var(--teal-line); }
+
+.toast-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--muted);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* 语义色只染左边那条竖线,不染整卡:通知会连着出现,整卡染色会让界面看起来在闪 */
+.toast--ok   { border-left-color: var(--teal); }
+.toast--warn { border-left-color: var(--flame); }
+.toast--err  { border-left-color: var(--danger); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes toast-out {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(6px); }
+}
+
 /* ---------------- 无障碍 / 动效偏好 ---------------- */
 
 @media (prefers-reduced-motion: reduce) {
+  .toast,
+  .toast.is-leaving { animation: none; }
   .coach-circle {
     transition-duration: .01ms !important;
     transform: scale(1) !important;

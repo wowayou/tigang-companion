@@ -113,22 +113,26 @@
         </div>
 
         <div class="coach">
-          <div class="coach-circle" id="coach-circle" data-phase="idle">
-            <span class="phase-label" id="phase-label" aria-live="polite">待开始</span>
-            <span class="countdown" id="countdown" aria-hidden="true">—</span>
+          <!--
+            三层:环(被 mask 掏空,只剩圆周)/ stage(不参与 mask,承载圆)/ 圆。
+            圆会 scale(0.62) 表示「收紧」,环必须固定不动,否则进度跟着呼吸缩放就读不准了。
+            环与圆不能是父子关系 —— mask 会把子元素一起裁掉,所以 stage 单独一层绝对定位。
+          -->
+          <div class="coach-ring" id="coach-ring" style="--p:0"></div>
+          <div class="coach-stage">
+            <button type="button" class="coach-circle" id="coach-circle" data-phase="idle" aria-label="开始训练">
+              <span class="phase-label" id="phase-label" aria-live="polite">待开始</span>
+              <span class="countdown is-glyph" id="countdown" aria-hidden="true">▶</span>
+            </button>
           </div>
         </div>
 
         <p class="set-progress" id="set-progress"></p>
 
-        <div class="progress-track" role="presentation">
-          <div class="progress-bar" id="overall-bar"></div>
-        </div>
-
         <div class="controls">
           <button type="button" class="btn btn-primary" id="btn-start" title="空格键">开始训练</button>
-          <button type="button" class="btn btn-ghost" id="btn-pause" title="空格键" disabled>暂停</button>
-          <button type="button" class="btn btn-ghost" id="btn-stop" disabled>结束</button>
+          <button type="button" class="btn btn-ghost" id="btn-pause" title="空格键" hidden>暂停</button>
+          <button type="button" class="btn btn-ghost" id="btn-stop" hidden>结束</button>
         </div>
 
         <div class="card done-panel" id="done-panel" hidden>
@@ -289,78 +293,115 @@
   <dialog class="dlg" id="dlg-settings" aria-label="设置">
     <h2 class="dlg-title">设置</h2>
 
-    <label class="opt-row">
-      <span class="opt-text">提示音</span>
-      <input type="checkbox" id="opt-sound" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">轻提示(倒数 / 呼吸引导)</span>
-      <input type="checkbox" id="opt-soft-cue" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">语音播报</span>
-      <input type="checkbox" id="opt-voice" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">震动</span>
-      <input type="checkbox" id="opt-vibration" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">每日提醒</span>
-      <input type="checkbox" id="opt-reminder-enabled" class="switch">
-    </label>
-
-    <label class="opt-row">
-      <span class="opt-text">提醒时间</span>
-      <input type="time" id="opt-reminder-time" class="time-input" value="21:00">
-    </label>
-
-    <div class="opt-block">
-      <p class="opt-block-title">同步(可选 · 端到端加密)</p>
+    <div class="opt-group">
+      <p class="opt-group-title">声音与反馈</p>
 
       <label class="opt-row">
-        <span class="opt-text">启用同步</span>
-        <input type="checkbox" id="opt-sync-enabled" class="switch">
+        <span class="opt-text">提示音</span>
+        <input type="checkbox" id="opt-sound" class="switch">
       </label>
 
-      <div class="sync-setup">
-        <label class="opt-col">
-          <span class="opt-text">主密码(加密钥匙,不离开本机)</span>
-          <input type="password" id="opt-sync-master" class="text-input" placeholder="设一个主密码(加密钥匙,忘记则远端数据不可恢复)" autocomplete="new-password">
-        </label>
+      <label class="opt-row is-sub">
+        <span class="opt-text">轻提示<small class="opt-sub">倒数 / 呼吸引导</small></span>
+        <input type="checkbox" id="opt-soft-cue" class="switch">
+      </label>
 
-        <div class="opt-col">
-          <label class="opt-text" for="opt-sync-user">本机同步 ID(不可猜,但也别公开)</label>
-          <div class="input-with-copy">
-            <input type="text" id="opt-sync-user" class="text-input" readonly placeholder="开启同步后自动生成">
-            <button type="button" class="btn btn-ghost copy-btn" id="btn-sync-copy" title="复制同步 ID">复制</button>
-          </div>
-        </div>
+      <label class="opt-row">
+        <span class="opt-text">语音播报<small class="opt-sub">扬声器外放,公共场合留意</small></span>
+        <input type="checkbox" id="opt-voice" class="switch">
+      </label>
 
-        <div class="opt-col">
-          <label class="opt-text" for="opt-sync-link">用其它设备的同步 ID(填入后会覆盖本机 ID)</label>
-          <div class="input-with-copy">
-            <input type="text" id="opt-sync-link" class="text-input" placeholder="粘贴另一台设备的同步 ID" autocomplete="off">
-            <button type="button" class="btn btn-primary link-btn" id="btn-sync-link">应用</button>
-          </div>
-        </div>
-
-        <div class="opt-actions">
-          <button type="button" class="btn btn-primary" id="btn-sync-now">立即同步</button>
-        </div>
-
-        <p class="hint">上次同步:<span id="sync-last">—</span> · 状态:<span id="sync-state" role="status" aria-live="polite">—</span></p>
-      </div>
-
-      <p class="hint">端到端加密 · 同步 ID 与主密码都要保密(ID 泄露可读取/覆盖密文,弱密码仍可能被离线猜解)</p>
+      <label class="opt-row">
+        <span class="opt-text">震动</span>
+        <input type="checkbox" id="opt-vibration" class="switch">
+      </label>
     </div>
 
-    <p class="hint">不开语音也能不看屏幕:收紧是上行音、维持是双平音、放松是下行音。语音开启后会通过扬声器外放,公共场合留意。</p>
-    <p class="hint">网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳</p>
+    <div class="opt-group">
+      <p class="opt-group-title">提醒</p>
+
+      <label class="opt-row">
+        <span class="opt-text">每日提醒<small class="opt-sub">仅在应用保持打开时生效,安装到桌面更可靠</small></span>
+        <input type="checkbox" id="opt-reminder-enabled" class="switch">
+      </label>
+
+      <label class="opt-row" id="reminder-time-row" hidden>
+        <span class="opt-text">提醒时间</span>
+        <input type="time" id="opt-reminder-time" class="time-input" value="21:00">
+      </label>
+    </div>
+
+    <div class="opt-group">
+      <p class="opt-group-title">数据</p>
+
+      <!-- 同步收成一行摘要:绝大多数用户不开它,不该让它占掉设置一半高度 -->
+      <button type="button" class="opt-row opt-entry" id="btn-sync-entry" aria-haspopup="dialog">
+        <span class="opt-text">多端同步<small class="opt-sub">可选 · 端到端加密</small></span>
+        <span class="opt-entry-value"><span id="sync-entry-state">未开启</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 5.5 15.5 12 9 18.5"></path>
+          </svg>
+        </span>
+      </button>
+    </div>
+
+    <p class="hint">不开语音也能不看屏幕:收紧是上行音、维持是双平音、放松是下行音。</p>
+
+    <form method="dialog" class="dlg-actions">
+      <button class="btn btn-primary" value="close">完成</button>
+    </form>
+  </dialog>
+
+  <!-- 同步二级弹窗:从设置里的「多端同步」一行进入 -->
+  <dialog class="dlg" id="dlg-sync" aria-label="多端同步">
+    <h2 class="dlg-title">多端同步</h2>
+
+    <label class="opt-row">
+      <span class="opt-text">启用同步</span>
+      <input type="checkbox" id="opt-sync-enabled" class="switch">
+    </label>
+
+    <div class="sync-setup">
+      <div class="opt-col">
+        <label class="opt-text" for="opt-sync-master">主密码<small class="opt-sub">加密钥匙,不离开本机;忘记则远端数据不可恢复</small></label>
+        <input type="password" id="opt-sync-master" class="text-input" placeholder="至少 8 位,别用纯数字" autocomplete="new-password" minlength="8">
+        <p class="field-hint" id="sync-pass-hint"></p>
+      </div>
+
+      <div class="opt-col">
+        <label class="opt-text" for="opt-sync-user">本机同步 ID<small class="opt-sub">不可猜,但也别公开</small></label>
+        <div class="input-with-copy is-stacked">
+          <input type="text" id="opt-sync-user" class="text-input mono" readonly placeholder="开启同步后自动生成">
+          <button type="button" class="btn btn-ghost copy-btn" id="btn-sync-copy" title="复制同步 ID">复制</button>
+        </div>
+      </div>
+
+      <div class="opt-col">
+        <label class="opt-text" for="opt-sync-link">用其它设备的同步 ID<small class="opt-sub">填入后会覆盖本机 ID</small></label>
+        <div class="input-with-copy">
+          <input type="text" id="opt-sync-link" class="text-input" placeholder="粘贴另一台设备的同步 ID" autocomplete="off">
+          <button type="button" class="btn btn-primary link-btn" id="btn-sync-link">应用</button>
+        </div>
+      </div>
+
+      <div class="opt-actions">
+        <button type="button" class="btn btn-primary" id="btn-sync-now">立即同步</button>
+      </div>
+
+      <p class="hint">上次同步:<span id="sync-last">—</span> · 状态:<span id="sync-state" role="status" aria-live="polite">—</span></p>
+
+      <!-- 解密失败的出路:没有它,记错/改过主密码的用户会永久卡在「主密码不符」 -->
+      <div class="sync-recover" id="sync-recover" hidden>
+        <p class="sync-recover-title">解不开远端数据?</p>
+        <p class="hint">远端密文是用另一个主密码加密的。先确认主密码有没有输错;确实想不起来了,就只能放弃远端那份重新开始 —— <strong>本机数据不会丢</strong>。</p>
+        <div class="row-btns">
+          <button type="button" class="btn btn-danger" id="btn-sync-overwrite">用本机覆盖远端</button>
+          <button type="button" class="btn btn-ghost" id="btn-sync-new-id">换一个新同步 ID</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="hint">端到端加密:后端只存密文,主密码不离开设备。同步 ID 与主密码都要保密,且最好分开传递 —— ID 泄露可读取/覆盖密文,弱主密码仍可能被离线猜解。</p>
 
     <form method="dialog" class="dlg-actions">
       <button class="btn btn-primary" value="close">完成</button>

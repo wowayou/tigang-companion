@@ -21,6 +21,12 @@ server {
   location / {
     limit_req zone=sync burst=20 nodelay;   # nginx 层兜底限流(见 http 块)
 
+    # ?key=<uuid> 是读写凭据(能 GET 密文、能 PUT 覆盖)。默认 log_format 会把它整条写进
+    # access.log —— 日志泄露 = 凭据泄露,且日志通常比数据库更容易被顺手打包带走。
+    # 关掉这个 location 的 access_log;要排查就看 systemd journal,后端只打 key 前 8 位。
+    # error_log 保留:它不记 query string。
+    access_log off;
+
     proxy_pass http://127.0.0.1:8787;
     proxy_set_header Host $host;
     # 覆写 X-Forwarded-For:后端据此拿到真实客户端 IP 做 per-IP 限流

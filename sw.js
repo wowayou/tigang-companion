@@ -1,6 +1,6 @@
 /* 提肛陪伴 — Service Worker(离线优先,零依赖) */
 
-const CACHE_NAME = 'tigang-v17';
+const CACHE_NAME = 'tigang-v18';
 
 const PRECACHE_URLS = [
   './',

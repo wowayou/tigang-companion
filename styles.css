@@ -28,6 +28,18 @@
 html {
   -webkit-text-size-adjust: 100%;
   background: var(--bg);
+  /*
+   * 安卓 Chrome 会给可点元素刷一层默认蓝方块(录屏里点齿轮时清晰可见),
+   * 和整套青色系格格不入。全局关掉,焦点可见性交给下面的 :focus-visible。
+   */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 关掉 tap highlight 后,键盘/读屏用户仍需要看得见焦点 */
+:focus-visible {
+  outline: 2px solid var(--teal-dark);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 body {
@@ -400,8 +412,40 @@ body {
   display: grid;
   place-items: center;
   flex: 1 1 auto;
-  min-height: 244px;
+  min-height: 232px;
   margin: 2px 0 4px;
+}
+
+/*
+ * 整体进度环。原来是底部一条 6px 横杠 —— 空闲态它是一条什么都不表达的灰线,
+ * 训练中视线又要在圆和屏幕底部之间来回跳。挪到圆周上,视线只需落在一处。
+ * conic-gradient 画扇形 + radial mask 掏空中心 = 一个元素搞定,不引 SVG。
+ */
+/*
+ * 环与圆叠在同一个 grid 单元里(grid-area: 1/1 + place-items:center),
+ * 不用 position:absolute —— 绝对定位子元素在 grid 容器里的静态位置各家实现不一致。
+ */
+.coach-ring,
+.coach-stage {
+  grid-area: 1 / 1;
+}
+
+.coach-ring {
+  width: 216px;
+  height: 216px;
+  border-radius: 50%;
+  background: conic-gradient(var(--teal) calc(var(--p, 0) * 1%), #dfeae7 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+}
+
+/* 环只在训练中有意义:空闲/完成态整圈留白,免得 0% 的灰环像是「坏了」 */
+.coach-ring.is-idle { background: none; }
+
+/* stage 不参与 mask,单独承载圆(mask 会把子元素一起裁掉) */
+.coach-stage {
+  display: grid;
+  place-items: center;
 }
 
 .coach-circle {
@@ -413,7 +457,13 @@ body {
   gap: 2px;
   width: 160px;
   height: 160px;
+  padding: 0;
+  border: 0;
   border-radius: 50%;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
   /*
    * 底色用 background-color(可过渡),立体感交给一层固定不变的叠加渐变。
    * v1 每个阶段各写一条 linear-gradient —— 渐变之间无法补间,所以颜色是硬切的。
@@ -500,40 +550,39 @@ body {
   letter-spacing: .01em;
 }
 
+/*
+ * 空闲/完成态放的是符号(▶ / ✓)而不是数字。原来那里是个「—」,
+ * 读起来像「没数据」而不是「待命」;换成播放符号,同时把圆是可点的这件事说出来。
+ */
+.countdown.is-glyph {
+  font-size: 30px;
+  line-height: 1.6;
+  opacity: .8;
+}
+
 /* ---------------- 进度 ---------------- */
 
 .set-progress {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   text-align: center;
   font-size: 13.5px;
   color: var(--muted);
   min-height: 1.6em;
 }
 
-.progress-track {
-  height: 6px;
-  margin-bottom: 14px;
-  border-radius: 999px;
-  background: #e4ecea;
-  overflow: hidden;
-}
-
-.progress-bar {
-  width: 0%;
-  height: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, #4bbfb0, var(--teal));
-  transition: width .15s linear;
-}
-
 /* ---------------- 按钮 ---------------- */
 
+/*
+ * 按状态出按钮,不再摆两个灰着的:空闲态只有「开始」可点,却让暂停/结束占掉 2/3 宽度,
+ * 主操作反而最不显眼。flex + hidden:藏掉的不占位,留下的自动填满。
+ */
 .controls {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr 1fr;
+  display: flex;
   gap: 10px;
   margin-bottom: 12px;
 }
+
+.controls .btn { flex: 1; }
 
 .btn {
   padding: 12px 10px;
@@ -1020,19 +1069,124 @@ body {
   font-size: 15px;
 }
 
-/* 设置弹窗里的分组块(如「同步」):顶部一条分隔线,标题小字 */
-.opt-block {
-  margin-top: 6px;
-  padding-top: 10px;
+/* 设置弹窗分组:组间一条分隔线 + 小字标题,替代原来七行平铺 */
+.opt-group {
+  margin-top: 4px;
+  padding-top: 8px;
   border-top: 1px solid var(--line);
 }
 
-.opt-block-title {
+.opt-group:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.opt-group-title {
   margin: 0 0 2px;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
+  letter-spacing: .04em;
   color: var(--muted);
 }
+
+/* 组内最后一行不画线:分组线已经把边界说清楚了,再叠一条显得碎 */
+.opt-group .opt-row:last-child { border-bottom: 0; }
+
+/*
+ * 选项副文案:原来这些话堆在弹窗最底部,离对应的开关十几行远,
+ * 用户读到时已经不知道在说哪个开关。放回各自行内,顺带砍掉三段独立 hint。
+ */
+.opt-sub {
+  display: block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+/* 子项(轻提示从属于提示音,逻辑上早已是 disabled 联动,视觉上也该缩进) */
+.opt-row.is-sub {
+  padding-left: 14px;
+  border-left: 2px solid var(--line);
+  margin-left: 2px;
+}
+
+.opt-row.is-sub .opt-text { font-size: 14px; }
+
+/* 一行摘要 + 右箭头,点进二级弹窗 */
+.opt-entry {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+}
+
+.opt-entry-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+.opt-entry-value svg {
+  width: 16px;
+  height: 16px;
+  opacity: .7;
+}
+
+/* 同步开着时摘要变主色,一眼能看出状态 */
+.opt-entry.is-on .opt-entry-value { color: var(--teal); font-weight: 600; }
+
+/* 输入框下方的即时校验反馈(主密码强度) */
+.field-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.field-hint.is-err { color: var(--flame-ink); }
+.field-hint.is-ok  { color: #2e7d32; }
+
+/*
+ * 同步 ID 用等宽:36 位 UUID 要靠肉眼核对,比例字体下极易看错。
+ * 录屏里这个框只显示得下 27 位(`239f0ae9-a905-4ec8-9089-047`)——要用户复制/核对的东西
+ * 看不全会让人怀疑到底复制对没有。让它独占一行,复制按钮换到下一行右侧。
+ */
+.text-input.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  letter-spacing: -.01em;
+}
+
+.input-with-copy.is-stacked { flex-wrap: wrap; }
+.input-with-copy.is-stacked .text-input { flex: 1 0 100%; }
+.input-with-copy.is-stacked .copy-btn { margin-left: auto; }
+
+/* 解密失败的出路块:平时不出现,出现时要显眼但不惊悚 */
+.sync-recover {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #f0d9c0;
+  border-radius: var(--radius-sm);
+  background: #fdf6ee;
+}
+
+.sync-recover-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--flame-ink);
+}
+
+.sync-recover .row-btns { margin-top: 10px; }
 
 /* 上下堆叠的选项行:文字在上,输入框在下占满整行 */
 .opt-col {
@@ -1105,13 +1259,14 @@ body {
   .coach-circle.is-pulsing::after { animation: none; opacity: .35; }
   .badge-row .badge,
   .phase-label { animation: none; }
-  .progress-bar,
   .mini-bar { transition: none; }
 }
 
 @media (min-width: 420px) {
   .coach-circle { width: 200px; height: 200px; }
+  .coach-ring { width: 258px; height: 258px; }
   .countdown { font-size: 62px; }
+  .countdown.is-glyph { font-size: 34px; }
 }
 
 /*
@@ -1119,8 +1274,10 @@ body {
  * 注意这里必须覆盖 min-height:基础规则用的是 min-height + flex:1,只改 height 是不起作用的。
  */
 @media (max-height: 700px) {
-  .coach { min-height: 186px; }
-  .coach-circle { width: 160px; height: 160px; }
-  .countdown { font-size: 46px; }
+  .coach { min-height: 178px; }
+  .coach-circle { width: 150px; height: 150px; }
+  .coach-ring { width: 200px; height: 200px; }
+  .countdown { font-size: 44px; }
+  .countdown.is-glyph { font-size: 26px; }
   .phase-label { font-size: 15px; }
 }

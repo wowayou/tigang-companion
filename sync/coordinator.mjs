@@ -158,8 +158,13 @@ export class SyncCoordinator {
   /**
    * 完整同步。相同 generation 只允许一条流水线;自动请求撞上在途任务时记一次 rerun,
    * 避免在加密快照之后发生的本地变化被吞掉。
+   *
+   * overwrite=true 是**唯一被许可的合并跳过**:主密码记错/改过时远端密文解不开,
+   * 正常流程会永久锁死 push(这是对的,防止用错密码覆盖云端),用户因此没有任何出路。
+   * 该模式仍然先 GET(不变量「PUT 前必须有同身份成功 GET」照旧成立),只是明知故犯地
+   * 丢弃远端明文、用本机数据整桶覆盖 —— 必须由用户显式确认后才可调用,见 overwriteRemote()。
    */
-  syncNow({ source = 'manual', retryOnRate = true } = {}) {
+  syncNow({ source = 'manual', retryOnRate = true, overwrite = false } = {}) {
     if (!this.enabled) return this.rejectEarly('disabled', source);
     if (!this.userId) return this.rejectEarly('missing-user-id', source);
     if (!this.passphrase) return this.rejectEarly('missing-passphrase', source);
@@ -193,9 +198,19 @@ export class SyncCoordinator {
     this.onBusy(true);
     this.emit('busy', { source });
 
-    run.promise = this.performSync(context, { source, retryOnRate })
+    run.promise = this.performSync(context, { source, retryOnRate, overwrite })
       .finally(() => this.finishRun(run));
     return run.promise;
+  }
+
+  /**
+   * 用本机数据整桶覆盖远端(丢弃远端内容),并解除解密失败门闸。
+   * 唯一用途:用户改了主密码 / 记错主密码,远端密文再也解不开,需要一个"重新开始"的出路。
+   * **调用方必须先向用户明确确认远端数据会被丢弃** —— 编排器不做二次确认。
+   */
+  overwriteRemote({ source = 'overwrite' } = {}) {
+    this.decryptFailed = false; // 门闸只挡自动流程;这里是用户显式授权的覆盖
+    return this.syncNow({ source, retryOnRate: true, overwrite: true });
   }
 
   async whenIdle() {
@@ -219,7 +234,7 @@ export class SyncCoordinator {
     );
   }
 
-  async performSync(context, { source, retryOnRate }) {
+  async performSync(context, { source, retryOnRate, overwrite = false }) {
     let conflicts = 0;
     let remoteWasEmpty = false;
     try {
@@ -234,6 +249,11 @@ export class SyncCoordinator {
         remoteWasEmpty = true;
         this.decryptFailed = false;
         this.setRemoteEmpty(true);
+      } else if (overwrite) {
+        // 显式覆盖:GET 已成功(不变量成立),这里明知故犯地不解密、不合并,
+        // 直接拿本机数据整桶盖掉。远端原内容就此丢失 —— 由调用方确认过。
+        this.setRemoteEmpty(false);
+        this.decryptFailed = false;
       } else {
         this.setRemoteEmpty(false);
         const decrypted = await this.decrypt(pulled.blob, context.passphrase);
@@ -267,7 +287,9 @@ export class SyncCoordinator {
         if (pushed.error === 'rate') {
           if (retryOnRate) {
             this.emit('push-rate-retry', { source });
-            this.scheduleRateRetry(context.generation);
+            // overwrite 必须随重试一起带上:否则重试走回普通流程,又会在解密处失败,
+            // 用户点了「覆盖」却什么也没发生。
+            this.scheduleRateRetry(context.generation, overwrite);
           } else {
             this.emit('push-rate', { source });
           }
@@ -282,8 +304,8 @@ export class SyncCoordinator {
       this.setRemoteEmpty(false);
       const syncedAt = this.now();
       this.onLastSync(syncedAt);
-      this.emit('synced', { source, conflicts, firstUpload: remoteWasEmpty });
-      return { ok: true, conflicts, firstUpload: remoteWasEmpty };
+      this.emit('synced', { source, conflicts, firstUpload: remoteWasEmpty, overwrote: overwrite });
+      return { ok: true, conflicts, firstUpload: remoteWasEmpty, overwrote: overwrite };
     } catch {
       if (!this.isCurrent(context)) return { ok: false, error: 'stale' };
       this.emit('sync-failed', { source });
@@ -291,13 +313,13 @@ export class SyncCoordinator {
     }
   }
 
-  scheduleRateRetry(generation) {
+  scheduleRateRetry(generation, overwrite = false) {
     if (this.retryTimer !== null) this.clearTimer(this.retryTimer);
     this.retryTimer = this.setTimer(() => {
       this.retryTimer = null;
       if (generation !== this.generation) return;
       // 重试也必须重新拉取,不能复用几秒前的密文快照盲推。
-      void this.syncNow({ source: 'retry', retryOnRate: false });
+      void this.syncNow({ source: 'retry', retryOnRate: false, overwrite });
     }, this.rateRetryMs);
   }
 

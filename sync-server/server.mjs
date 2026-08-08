@@ -19,6 +19,9 @@
  *   · 单 IP 全部端点 > 20 次/分 → 429(内存 Map + 时间窗,进程重启清零可接受;单机够用)
  *   nginx 层另配 limit_req 兜底(见 nginx.conf.example)。
  *
+ * 日志:userId 是读写凭据,**绝不整条打印**。日志只记 pathname + key 前 8 位(见 logLine)。
+ *   nginx 侧也要关掉 /sync 的 access_log,否则默认 log_format 会把 ?key= 整条写盘。
+ *
  * 环境变量:
  *   HOST     默认 127.0.0.1(只监听回环,nginx 反代,不直接暴露)
  *   PORT     默认 8787
@@ -81,6 +84,22 @@ function checkIpLimit(ip, now = Date.now()) {
   hits.push(now);
   ipHits.set(ip, hits);
   return true;
+}
+
+/* ---------------- 日志(凭据不落盘) ---------------- */
+
+// userId 是**读写凭据**:知道它就能 GET 密文、PUT 覆盖。它出现在 ?key= 里,
+// 所以任何打印 req.url 的日志都等于把凭据写进 journal —— 日志泄露即凭据泄露。
+// 这里统一走 logLine():URL 只留 pathname,key 只留前 8 位用于排查关联。
+// nginx 侧同样要关掉该 location 的 access_log(见 nginx.conf.example)。
+function keyTag(key) {
+  const s = String(key || '');
+  return s ? `${s.slice(0, 8)}…` : '-';
+}
+
+function logLine(status, ip, req, key) {
+  const path = String(req.url || '').split('?')[0];
+  console.log(`${new Date().toISOString()} ${status} ip=${ip} ${req.method} ${path} key=${keyTag(key)}`);
 }
 
 /* ---------------- 响应工具 ---------------- */
@@ -193,7 +212,7 @@ const server = createServer((req, res) => {
 
   const ip = clientIp(req);
   if (!checkIpLimit(ip)) {
-    console.log(`${new Date().toISOString()} 429 ip=${ip} ${req.method} ${req.url}`);
+    logLine(429, ip, req, new URL(req.url, 'http://localhost').searchParams.get('key'));
     send(res, 429, { ok: false, error: 'rate' });
     return;
   }
@@ -211,7 +230,7 @@ const server = createServer((req, res) => {
     // 免得任意字符串都能建桶(如手填时打成 "testuser" 会撞上别人/测试残留的桶)。
     // 客户端也校验,但纯前端校验可绕过,这里是最终防线。
     if (!UUID_RE.test(rawKey) || rawKey.length > MAX_KEY_LEN) {
-      console.log(`${new Date().toISOString()} 400 ip=${ip} ${req.method} ${req.url}`);
+      logLine(400, ip, req, rawKey);
       send(res, 400, { ok: false, error: 'bad-key' });
       return;
     }

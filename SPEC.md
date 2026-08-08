@@ -287,7 +287,9 @@ export function dailyGoal(records, todayStr, goal = DEFAULT_DAILY_GOAL) {}
   - `persist()` 后:debounce 2s → 完整安全流水线,**不是直接 push**。
   - PUT 429:4.5s 后重新执行完整流水线一次;仍 429 才提示稍后再试。
   - 离线(`!navigator.onLine`)跳过。
-- **UI**(设置弹窗一组,新增/更新 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#opt-sync-user`(本机同步 ID,只读) `#btn-sync-copy`(复制同步 ID) `#opt-sync-link`(粘贴另一台设备的同步 ID) `#btn-sync-link`(应用链接 ID) `#btn-sync-now` `#sync-last` `#sync-state`;`.input-with-copy` 行(输入框 flex:1 + 按钮固定不换行);同步中禁用「立即同步/应用 ID」防重复操作,但底层 generation 防线仍必须成立;状态行按 `sync-ok`/`sync-err`/`sync-busy` 着色。
+- **UI**(独立二级弹窗 `#dlg-sync`,由设置里的 `#btn-sync-entry` 打开;新增/更新 DOM id 见 §8.x,`sync-ok/sync-err/sync-busy` 为状态色 class 非 id):`#opt-sync-enabled` `#opt-sync-master` `#opt-sync-user`(本机同步 ID,只读) `#btn-sync-copy`(复制同步 ID) `#opt-sync-link`(粘贴另一台设备的同步 ID) `#btn-sync-link`(应用链接 ID) `#btn-sync-now` `#sync-last` `#sync-state`;`.input-with-copy` 行(输入框 flex:1 + 按钮固定不换行);同步中禁用「立即同步/应用 ID」防重复操作,但底层 generation 防线仍必须成立;状态行按 `sync-ok`/`sync-err`/`sync-busy` 着色。
+- **主密码强度门槛**(`checkPassphrase`,core/sync.js):`< 8` 位或纯数字 `< 12` 位一律拒绝启用同步,错误显示在 `#sync-pass-hint`(`sync-err` 着色),且 `passphraseUsable()` 为假时**不设置 coordinator 密码、不做任何网络请求**。理由:userId 一旦泄露就可离线爆破,600000 轮只抬高单次成本、不缩小搜索空间——4 位密码在任何轮数下都是秒级失守,所以下限必须由程序守住而不能只写在 hint 里。`#opt-sync-user` 用 `.text-input.mono` + `.input-with-copy.is-stacked`(输入框独占一行、复制按钮换行到右侧)保证 36 位 UUID **完整可见**——要用户核对/复制的东西看不全会让人怀疑复制对不对。
+- **解密失败的两条出路**(`#sync-recover`,仅在 `decryptFailed` 时显示):`#btn-sync-overwrite`(用本机覆盖远端,走 `coordinator.overwriteRemote()`,`confirm` 二次确认)与 `#btn-sync-new-id`(换全新 userId 重新开桶,原远端数据不再关联)。**门闸锁死自动 push 是对的**(防用错密码覆盖云端),但必须同时存在一个「我确认就是要重新开始」的显式开关,否则记错/改过主密码的用户永久卡在「主密码不符」——`overwriteRemote` 是唯一可以清 `decryptFailed` 的用户授权入口。
 - **正确性说明**:**不同主密码 → 解密失败 → 本地不受影响且无 PUT** 是端到端加密的正确表现,不是 bug;离线打开纯本地不报错。
 
 ## §7 测试要求(node --test,零依赖,实现 agent 必须跑到全绿)
@@ -341,9 +343,13 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 - 方案选择:5 个 radio(name="preset",value 为 beginner/standard/advanced/quick/custom)渲染成胶囊按钮;选 custom 时显示自定义面板(number 输入:`#cfg-contract` `#cfg-relax` `#cfg-reps` `#cfg-sets` `#cfg-rest`,范围与 §3 一致,不含 prepareSec/holdSec 输入)。方案变更即持久化到 settings 并 reset 会话;训练进行中禁用方案切换。
 - **维持开关**:`#opt-hold-enabled`(iOS 风格开关,见下方 `.switch` 说明)控制全局 `settings.holdSec` 是否 >0;展开秒数输入 `#hold-sec-wrap`(内含 `#cfg-hold`,范围 1-60,与 §3 一致)。关闭开关时记住上一次输入的秒数,重新打开不必再输一遍。holdSec 是**全局设置**而非 custom 的字段(见 §5)——四个预设与自定义方案共用同一个「维持」开关。
 
-**引导圆 `#coach-circle`**:- 进度:`#set-progress`。运行中文案 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `准备好就开始`(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。总进度条 `#overall-bar`(宽度=overallProgress)。
+**引导圆 `#coach-circle`**:是 `<button>` 而非 div——圆本身可点(空闲=开始 / 运行=暂停 / 暂停=继续 / 完成=再来一次),点它等价于点对应按钮,因此语音与 AudioContext 的首次调用照样落在用户手势内(见 §约定)。`aria-label` 随态更新为当前动作。
 
-- 按钮:`#btn-start`(开始训练,done 态文案变为"再来一次")、`#btn-pause`(暂停/继续,文案随态切换)、`#btn-stop`(结束)。驱动:`setInterval` 100ms,`next = tick(state, Date.now())`;**阶段推进**(phase 或 setIndex/repIndex 任一变化——`restSec=0` 时跨组是 contract→contract,仅比较 phase 会漏一拍)时触发提示音/语音/震动 + 圆与环重新进入动画;done 时写入记录并展示完成面板 `#done-panel`。
+- **进度环 `#coach-ring`**:取代旧的条形 `#overall-bar`(已删除)。`conic-gradient(var(--teal) calc(var(--p) * 1%), #dfeae7 0)` + `mask: radial-gradient(...)` 掏空成环;进度由行内 `style="--p:<0-100>"` 驱动(=overallProgress×100)。**三层结构不可合并**:`.coach-ring` / `.coach-stage` / `.coach-circle`,环与 stage 靠 `grid-area:1/1` 叠在同一格(不用 `position:absolute`——绝对定位子元素在 grid 容器里的静态位置各家实现不一致);环**不能是圆的父元素**,否则 mask 会把圆一起裁掉;圆 `scale(0.62)` 呼吸时环必须固定不动,否则进度跟着缩放读不准。空闲/完成态加 `.is-idle`(`background:none`)让整圈留白,免得 0% 的灰环像坏了。
+- **`#countdown` 双形态**:运行中是秒数;空闲显示 `▶`、完成显示 `✓`,此时加 `.is-glyph`(字号降到 34px)。空闲态不用 `—`——那读起来像「没数据」而不是「待命」,`▶` 同时提示圆可点。
+- 进度文案:`#set-progress`。运行中 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `准备好就开始`(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。
+
+- 按钮:`#btn-start`(开始训练,done 态文案变为"再来一次")、`#btn-pause`(暂停/继续,文案随态切换)、`#btn-stop`(结束)。**按状态出按钮**:空闲态只留 `#btn-start` 并占满整宽,运行态换成 `#btn-pause` + `#btn-stop`;隐藏用 `hidden`(`.controls` 是 flex + `flex:1`,藏掉的不占位),`disabled` 同时保留以防 hidden 切换间隙被键盘激活。驱动:`setInterval` 100ms,`next = tick(state, Date.now())`;**阶段推进**(phase 或 setIndex/repIndex 任一变化——`restSec=0` 时跨组是 contract→contract,仅比较 phase 会漏一拍)时触发提示音/语音/震动 + 圆与环重新进入动画;done 时写入记录并展示完成面板 `#done-panel`。
 - `#btn-stop` 训练中点击 → `confirm('确定结束本次训练?')`;若 `completedReps>0` 以 `finished:false` 记录后 reset。
 - 记录写入:`makeRecord({ dateStr: localDateStr(new Date()), completedReps, totalReps: config.sets*config.repsPerSet, durationSec: Math.round((Date.now()-startedAt)/1000), finished })`,append 到 records 后 save。
 
@@ -375,7 +381,11 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 **震动**:`navigator.vibrate` 存在且 `settings.vibration` 时,按阶段各不同的 pattern(contract/hold/relax/rest/done)。
 
 - 屏幕常亮:start 时 `navigator.wakeLock?.request('screen')` try/catch,done/stop 时 release。
-- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`:`#opt-sound`、`#opt-soft-cue`、`#opt-voice`、`#opt-vibration`(均为 `.switch`),提醒 `#opt-reminder-enabled` + `<input type="time" id="opt-reminder-time">`,下方小字说明不开语音也能靠音高方向分辨阶段、以及语音开启后会外放需留意公共场合,和"网页版提醒仅在应用保持打开时生效;安装到桌面后体验更佳"。`#opt-soft-cue`(轻提示)独立于 `#opt-sound`,但受其约束——总开关关掉后轻提示也不响。开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
+- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`。**分三组**,每组一个 `.opt-group` + `.opt-group-title`(声音 / 提醒 / 同步),说明文字紧跟各自开关而非全堆在弹窗底部——七个开关平铺加常驻展开的同步区块会长到要滚两屏。
+  - **声音**:`#opt-sound`、`#opt-voice`、`#opt-vibration`(均为 `.switch`)。`#opt-soft-cue`(轻提示)是 `#opt-sound` 的**子项**(`.opt-row.is-sub`,缩进 + 左侧竖线 + 小一号字):它逻辑上受总开关约束(`disabled = !sound`),视觉层级必须与之一致。
+  - **提醒**:`#opt-reminder-enabled` + `#opt-reminder-time`(`<input type="time">`)。时间行包在 `#reminder-time-row` 里,**随开关 hidden**——关着提醒还占一行是白占。
+  - **同步**:折叠成单行入口 `#btn-sync-entry`(`.opt-row.opt-entry`,右侧 `#sync-entry-state` 显示「未开启 / 已开启」,开启时整行 `.is-on` 转主色),点开二级 `<dialog id="dlg-sync">`。同步区块占了原弹窗六成高度而绝大多数用户从不开它,必须让路。
+- 开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
 - `.switch`:v1 是原生 checkbox(iOS 上渲染成带蓝色聚焦框的方块勾,与整体视觉不搭);v2 改成 `appearance: none` 自绘的 iOS 风格开关(胶囊轨道 + 圆形滑块,`:checked` 切换位置与背景色)。
 
 ### 统计 tab
@@ -441,12 +451,13 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 | 顶栏 | `btn-settings` `streak-chip` `streak-chip-num` `site-stats` `st-doing` `st-visits` |
 | tab 与面板 | `tab-train` `tab-stats` `tab-knowledge` `panel-train` `panel-stats` `panel-knowledge` |
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
-| 引导圆与进度 | `coach-circle` `phase-label` `countdown` `set-progress` `overall-bar` |
+| 引导圆与进度 | `coach-ring` `coach-circle`(button) `phase-label` `countdown` `set-progress` |
 | 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
 | 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` |
 | 分享弹窗 | `dlg-share` `share-img` `btn-save-share` `btn-share-close` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
-| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `opt-reminder-time` `opt-sync-enabled` `opt-sync-master` `opt-sync-user` `btn-sync-copy` `opt-sync-link` `btn-sync-link` `btn-sync-now` `sync-last` `sync-state` |
+| 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `reminder-time-row` `opt-reminder-time` `btn-sync-entry` `sync-entry-state` |
+| 同步弹窗(二级) | `dlg-sync` `opt-sync-enabled` `opt-sync-master` `sync-pass-hint` `opt-sync-user` `btn-sync-copy` `opt-sync-link` `btn-sync-link` `btn-sync-now` `sync-last` `sync-state` `sync-recover` `btn-sync-overwrite` `btn-sync-new-id` |
 | 导入弹窗 | `dlg-import` `import-summary` `import-merge` `import-replace` `import-cancel` |
 
 ### §8.z 全站计数(空闲态紧凑徽标:此刻在做人数 + 总访问)
@@ -529,5 +540,12 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 再一轮修订(`CACHE_NAME` → `tigang-v17`):
 
 19. **同步编排彻底修复(2026-08-07)**:验收发现 D33 的布尔门闸仍不足——拉取网络失败后仍会 push、切换 ID/密码时旧 debounce/retry/in-flight 任务可能串桶、自动同步是盲 push、首次 ID 不即时显示。新增 `sync/coordinator.mjs`:用 generation + AbortController + 身份快照统一手动/打开/自动/重试四条路径;任何 PUT 前都必须同上下文 GET 成功或明确 none;429 重试重新 GET;同步中本地再变化会 rerun。`sync/client.mjs` 加外部 signal + no-store;设置开关即时生成 ID;同步中禁重复按钮。新增 coordinator/client 竞态测试。同步修正 systemd docker0 监听、后端 no-store/UUID 小写、圆尺寸断点与部署验收文档。
+
+20. **同步安全加固 + 设置精简 + 训练页优雅化(2026-08-08,`CACHE_NAME` → `tigang-v18`)**:
+    - **安全四项**(前两项是真 bug):① 🔴 主密码**无任何长度下限**——录屏里出现 3-4 位主密码,userId 泄露后离线秒破,600000 轮也救不回来 → `core/sync.js` 新增纯函数 `checkPassphrase`(< 8 位 / 纯数字 < 12 位拒绝),`passphraseUsable()` 为假时不设 coordinator 密码、不发任何请求;② 🔴 **userId 进日志**——nginx 默认 log_format 写 `?key=<uuid>`,后端 429/400 分支 `console.log(req.url)`,凭据进日志=日志泄露即凭据泄露 → nginx `access_log off` + 后端统一 `logLine()` 只打 key 前 8 位与剥掉 query 的 path;③ `iter` 来自后端属不可信输入,`1e9` 可冻死主线程 → 加 `MIN/MAX_ACCEPTED_ITERATIONS` 区间校验(**拒绝而非静默夹取**:静默改数会让「后端在撒谎」看起来像「密码错」);④ 轮数 200000 → 600000(OWASP 现行建议;因 `iter` 随 blob 存,升级天然向后兼容)。
+    - **解密失败的出路**:门闸锁死自动 push 是对的,但必须配一个显式「我确认要重新开始」——`#sync-recover` 提供 `#btn-sync-overwrite`(本机覆盖远端)与 `#btn-sync-new-id`(换新桶),否则用户永久卡在「主密码不符」。
+    - **设置精简**:七个开关平铺 + 常驻同步区块要滚两屏 → 分三组(声音/提醒/同步)、同步折叠成单行入口 `#btn-sync-entry` + 二级 `#dlg-sync`(砍掉六成高度)、提醒时间行随开关 hidden、轻提示降为提示音子项(与其 `disabled` 约束对齐)、说明文字下沉到各自开关旁。
+    - **训练页**:条形 `#overall-bar` → 圆周进度环 `#coach-ring`(三层 `grid-area:1/1` 叠层,环不能当圆的父元素否则被 mask 裁掉);圆改 `<button>` 可点(手势内调用语音/AudioContext 依旧成立);空闲态 `—` → `▶` 字形、进度环留白、按钮按状态出(空闲整宽「开始」);全局 `-webkit-tap-highlight-color: transparent` 消掉安卓蓝框。
+    - **为什么有了 UUID 还要主密码**(结论写进 `core/sync.js` 顶部注释):userId 是**会流动的寻址凭据**(要跨设备复制、出现在 URL query 与 localStorage 明文里),会被到处复制的东西不能同时当解密钥匙;主密码是唯一不上网的那一半,「后端只见密文」「ID 泄露最多被覆盖、读不出明文」两句承诺全靠它。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

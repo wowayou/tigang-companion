@@ -2,12 +2,47 @@
 // 约束:不访问 DOM / Date.now() / localStorage;crypto 作参数注入(默认 globalThis.crypto)。
 // 本模块零依赖,可整体迁到 time-logger。
 //
-// 加密模型:主密码永不离开设备;AES-GCM-256 + PBKDF2-SHA256(200000 轮)。
+// 加密模型:主密码永不离开设备;AES-GCM-256 + PBKDF2-SHA256(600000 轮)。
 // 后端只存 {v,salt,iv,ct,iter} 密文 blob,永远看不到明文。GCM 自带完整性校验:
 // 密文被篡改 / 主密码错误 → decryptBlob 返回 {ok:false},绝不会解出半截乱码。
 // crypto.subtle 需要安全上下文(https / localhost),PWA 部署在 https 下满足。
+//
+// 为什么 userId 有了还要主密码:userId 是**会流动的寻址凭据**(要从设备 A 复制到设备 B、
+// 出现在 URL query 与 localStorage 明文里),一个会被到处复制的东西不能同时当解密钥匙。
+// 主密码是唯一不上网的那一半,它才是「后端只见密文」「ID 泄露最多被覆盖、读不出明文」
+// 这两句承诺的全部依据。删掉它 = 后端存明文 + 单因素凭据。见 DEVELOPMENT.md D35。
 
-export const PBKDF2_ITERATIONS = 200000;
+// 轮数 2026-08-07 由 200000 提到 600000(OWASP 对 PBKDF2-HMAC-SHA256 的当前建议)。
+// 升级天然向后兼容:轮数随 blob 存(iter 字段),旧 blob 仍按自己的 iter 解,新 blob 才用新值。
+export const PBKDF2_ITERATIONS = 600000;
+
+// 解密时接受的 iter 区间。iter 来自后端响应,属于**不可信输入**:
+// 恶意/被入侵的后端返回 iter:1e9 就能把客户端卡死在 deriveKey 上(主线程冻结 = DoS);
+// 返回 iter:1 则试图把成本降到可以在线爆破。越界一律拒绝,不做静默夹取——
+// 静默改数会让「解不开」看起来像密码错,而这其实是后端在撒谎,值得区分。
+export const MIN_ACCEPTED_ITERATIONS = 100000;
+export const MAX_ACCEPTED_ITERATIONS = 1000000;
+
+/* ---------------- 主密码强度 ---------------- */
+
+/** 主密码最小长度。低于此值时 UI 拒绝启用同步。 */
+export const MIN_PASSPHRASE_LENGTH = 8;
+/** 纯数字主密码的最小长度(纯数字搜索空间小,8 位纯数字离线爆破是分钟级)。 */
+export const MIN_DIGITS_ONLY_LENGTH = 12;
+
+/**
+ * 校验主密码强度。**这是整套加密体系里唯一由用户决定强度的环节**:
+ * userId 一旦泄露,攻击者可离线爆破密文,600000 轮只抬高单次成本、不缩小搜索空间——
+ * 4 位密码在任何轮数下都是秒级失守。所以下限必须由程序守住,不能只写在 hint 里。
+ * @returns {{ok:true} | {ok:false, error:'empty'|'too-short'|'digits-only'}}
+ */
+export function checkPassphrase(raw) {
+  const s = String(raw ?? '');
+  if (!s) return { ok: false, error: 'empty' };
+  if (s.length < MIN_PASSPHRASE_LENGTH) return { ok: false, error: 'too-short' };
+  if (/^\d+$/.test(s) && s.length < MIN_DIGITS_ONLY_LENGTH) return { ok: false, error: 'digits-only' };
+  return { ok: true };
+}
 
 /* ---------------- base64 工具(浏览器与 Node 通用) ---------------- */
 
@@ -60,7 +95,7 @@ export async function encryptBlob(plaintextObj, passphrase, crypto = globalThis.
 
 /**
  * 解密 blob → {ok:true, data} | {ok:false, error}。
- * 错误主密码 / 损坏密文 / 非法 blob 一律返回 {ok:false},**不抛**——调用方静默降级纯本地。
+ * 错误主密码 / 损坏密文 / 非法 blob / 越界 iter 一律返回 {ok:false},**不抛**——调用方静默降级纯本地。
  */
 export async function decryptBlob(blob, passphrase, crypto = globalThis.crypto) {
   try {
@@ -68,7 +103,11 @@ export async function decryptBlob(blob, passphrase, crypto = globalThis.crypto) 
     const salt = fromB64(blob.salt);
     const iv = fromB64(blob.iv);
     const ct = fromB64(blob.ct);
-    const iter = Number.isFinite(Number(blob.iter)) ? Number(blob.iter) : PBKDF2_ITERATIONS;
+    // iter 是后端可控输入,先卡区间再派生:越界的值要么想冻死客户端,要么想降低爆破成本。
+    const iter = Number(blob.iter);
+    if (!Number.isInteger(iter) || iter < MIN_ACCEPTED_ITERATIONS || iter > MAX_ACCEPTED_ITERATIONS) {
+      return { ok: false, error: 'bad-iter' };
+    }
 
     const enc = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(String(passphrase)), 'PBKDF2', false, ['deriveKey']);

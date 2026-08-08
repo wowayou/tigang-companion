@@ -19,7 +19,7 @@ import {
 import { localDateStr, makeRecord, computeStreak, totals, lastNDays } from './core/stats.js';
 import { evaluate, unlockedIds, newlyUnlocked, dailyGoal } from './core/achievements.js';
 import { load, save, clearAll, exportJSON, parseBackup, mergeRecords } from './core/storage.js';
-import { newUserId, normalizeUserId } from './core/sync.js';
+import { newUserId, normalizeUserId, checkPassphrase, MIN_PASSPHRASE_LENGTH, MIN_DIGITS_ONLY_LENGTH } from './core/sync.js';
 import { SyncCoordinator } from './sync/coordinator.mjs';
 
 /* ------------------------------------------------------------------ *
@@ -58,10 +58,10 @@ const el = {
   cfgHold: $('cfg-hold'),
 
   coachCircle: $('coach-circle'),
+  coachRing: $('coach-ring'),
   phaseLabel: $('phase-label'),
   countdown: $('countdown'),
   setProgress: $('set-progress'),
-  overallBar: $('overall-bar'),
 
   btnStart: $('btn-start'),
   btnPause: $('btn-pause'),
@@ -108,8 +108,13 @@ const el = {
   optVibration: $('opt-vibration'),
   optReminderEnabled: $('opt-reminder-enabled'),
   optReminderTime: $('opt-reminder-time'),
+  reminderTimeRow: $('reminder-time-row'),
+  btnSyncEntry: $('btn-sync-entry'),
+  syncEntryState: $('sync-entry-state'),
+  dlgSync: $('dlg-sync'),
   optSyncEnabled: $('opt-sync-enabled'),
   optSyncMaster: $('opt-sync-master'),
+  syncPassHint: $('sync-pass-hint'),
   optSyncUser: $('opt-sync-user'),
   btnSyncCopy: $('btn-sync-copy'),
   optSyncLink: $('opt-sync-link'),
@@ -117,6 +122,9 @@ const el = {
   btnSyncNow: $('btn-sync-now'),
   syncLast: $('sync-last'),
   syncState: $('sync-state'),
+  syncRecover: $('sync-recover'),
+  btnSyncOverwrite: $('btn-sync-overwrite'),
+  btnSyncNewId: $('btn-sync-new-id'),
 };
 
 const presetRadios = Array.from(document.querySelectorAll('input[name="preset"]'));
@@ -546,13 +554,17 @@ function renderTrain() {
   const now = Date.now();
   const s = session;
   const c = s.config;
+  const idle = s.phase === 'idle' || s.phase === 'done';
 
   el.phaseLabel.textContent = PHASE_LABEL[s.phase] || '';
 
-  if (s.phase === 'idle' || s.phase === 'done') {
-    el.countdown.textContent = '—';
+  // 空闲/完成态放符号(▶ / ✓)而非数字:「—」读起来像坏了,而 ▶ 顺便说明圆是可点的
+  if (idle) {
+    el.countdown.textContent = s.phase === 'done' ? '✓' : '▶';
+    el.countdown.classList.add('is-glyph');
   } else {
     el.countdown.textContent = String(Math.max(0, Math.ceil(remainingInPhaseMs(s, now) / 1000)));
+    el.countdown.classList.remove('is-glyph');
   }
 
   const running = isRunning(s);
@@ -575,14 +587,29 @@ function renderTrain() {
     el.setProgress.textContent = `第 ${s.setIndex + 1}/${c.sets} 组 · 第 ${s.repIndex + 1}/${c.repsPerSet} 次`;
   }
 
+  // 整体进度画在圆周上(原来是屏幕底部一条横杠,视线要在两处之间跳)。
+  // 空闲/完成态整圈留白:0% 的灰环看起来像坏掉,不如不画。
   const pct = Math.min(100, Math.max(0, overallProgress(s, now) * 100));
-  el.overallBar.style.width = `${pct.toFixed(2)}%`;
+  el.coachRing.style.setProperty('--p', pct.toFixed(2));
+  el.coachRing.classList.toggle('is-idle', !running);
 
-  el.btnStart.disabled = running;
+  // 按状态出按钮:空闲只留「开始」并占满整宽,训练中换成「暂停 + 结束」。
+  // 摆一排灰着的按钮既占位又让主操作不显眼。
+  el.btnStart.hidden = running;
   el.btnStart.textContent = s.phase === 'done' ? '再来一次' : '开始训练';
-  el.btnPause.disabled = !running;
+  el.btnPause.hidden = !running;
   el.btnPause.textContent = s.paused ? '继续' : '暂停';
+  el.btnStop.hidden = !running;
+  // hidden 之外仍保留 disabled:键盘/读屏在 hidden 切换的间隙不会点到无效按钮
+  el.btnStart.disabled = running;
+  el.btnPause.disabled = !running;
   el.btnStop.disabled = !running;
+
+  // 圆本身就是主操作:空闲=开始,训练中=暂停/继续
+  el.coachCircle.setAttribute(
+    'aria-label',
+    !running ? (s.phase === 'done' ? '再来一次' : '开始训练') : (s.paused ? '继续训练' : '暂停训练'),
+  );
 
   // 训练中锁住方案:改配置会重置会话,等于白练
   el.planToggle.disabled = running;
@@ -663,13 +690,17 @@ function renderSettingsForm() {
   el.optVibration.checked = !!data.settings.vibration;
   el.optReminderEnabled.checked = !!data.settings.reminder.enabled;
   el.optReminderTime.value = data.settings.reminder.time || '21:00';
-  // 同步:开关回填;主密码/按钮/状态组按开关 hidden 收起;主密码从会话级缓存回填(sessionStorage,见 §6.z)
+  // 提醒时间跟着开关走:关着提醒时这一行没有意义,不该占一行(与 hold-sec-wrap 同一套路)
+  if (el.reminderTimeRow) el.reminderTimeRow.hidden = !data.settings.reminder.enabled;
+  // 同步收成设置里的一行摘要;详细设置全在二级弹窗 #dlg-sync
+  renderSyncEntry();
   el.optSyncEnabled.checked = syncEnabled();
   if (syncSetupWrap) syncSetupWrap.hidden = !syncEnabled();
   if (syncEnabled()) ensureSyncUserId();
   if (el.optSyncMaster) el.optSyncMaster.value = syncMasterPass;
   // 本机同步 ID:开启同步即生成并显示,无需先执行一次网络同步。
   if (el.optSyncUser) el.optSyncUser.value = syncUserId || '';
+  renderPassHint();
   updateSyncButtonLabel();
   updateSyncControls();
   if (el.syncLast) el.syncLast.textContent = syncLastAt ? formatSyncTime(syncLastAt) : '—';
@@ -677,6 +708,48 @@ function renderSettingsForm() {
     el.syncState.textContent = '—';
     el.syncState.classList.remove('sync-ok', 'sync-err', 'sync-busy');
   }
+}
+
+/** 设置里那行「多端同步 · 未开启/已开启」摘要。 */
+function renderSyncEntry() {
+  if (!el.syncEntryState || !el.btnSyncEntry) return;
+  const on = syncEnabled();
+  el.syncEntryState.textContent = on ? '已开启' : '未开启';
+  el.btnSyncEntry.classList.toggle('is-on', on);
+}
+
+/**
+ * 主密码强度提示。这是整套加密里唯一由用户决定强度的环节:
+ * userId 泄露后攻击者可离线爆破,600000 轮只抬高单次成本、不缩小搜索空间。
+ * 所以下限由程序守住,不能只写在小字里 —— 弱密码直接禁用同步按钮。
+ */
+function renderPassHint() {
+  if (!el.syncPassHint) return;
+  const node = el.syncPassHint;
+  node.classList.remove('is-err', 'is-ok');
+  if (!syncMasterPass) {
+    node.textContent = `至少 ${MIN_PASSPHRASE_LENGTH} 位;忘记后远端数据不可恢复(本机数据不受影响)。`;
+    return;
+  }
+  const check = checkPassphrase(syncMasterPass);
+  if (check.ok) {
+    node.textContent = '强度可以';
+    node.classList.add('is-ok');
+    return;
+  }
+  node.classList.add('is-err');
+  if (check.error === 'too-short') {
+    node.textContent = `太短了,至少 ${MIN_PASSPHRASE_LENGTH} 位 —— 同步 ID 一旦泄露,短密码是分钟级就能爆破的。`;
+  } else if (check.error === 'digits-only') {
+    node.textContent = `纯数字至少要 ${MIN_DIGITS_ONLY_LENGTH} 位,或者掺一个字母/符号。`;
+  } else {
+    node.textContent = `至少 ${MIN_PASSPHRASE_LENGTH} 位。`;
+  }
+}
+
+/** 主密码够不够格真正拿去加密/同步。 */
+function passphraseUsable() {
+  return checkPassphrase(syncMasterPass).ok;
 }
 
 function renderPresetForm() {
@@ -1008,6 +1081,17 @@ el.btnStop.addEventListener('click', () => {
   resetSession();
 });
 
+/*
+ * 圆本身就是主操作:空闲→开始,训练中→暂停/继续。
+ * 直接转发到按钮的 click,而不是复制一份逻辑 —— 两条路径必须永远同步,
+ * 尤其是「AudioContext / speechSynthesis 首次调用必须在用户手势里」这条:
+ * click() 由真实手势触发,同样处在手势上下文内,iOS 不会静默丢弃。
+ */
+el.coachCircle.addEventListener('click', () => {
+  if (isRunning(session)) el.btnPause.click();
+  else el.btnStart.click();
+});
+
 /* ------------------------------------------------------------------ *
  * 事件:维持阶段
  * ------------------------------------------------------------------ */
@@ -1148,6 +1232,7 @@ el.optReminderEnabled.addEventListener('change', async () => {
     }
   }
   data.settings.reminder.enabled = el.optReminderEnabled.checked;
+  if (el.reminderTimeRow) el.reminderTimeRow.hidden = !el.optReminderEnabled.checked;
   persist();
   scheduleReminder();
 });
@@ -1158,13 +1243,25 @@ el.optReminderTime.addEventListener('change', () => {
   scheduleReminder();
 });
 
+/* 设置里的「多端同步」一行 → 打开二级弹窗。同步 UI 从主设置搬到这里,主设置回到 6 行以内。 */
+el.btnSyncEntry.addEventListener('click', () => {
+  renderSettingsForm();
+  if (typeof el.dlgSync.showModal === 'function') el.dlgSync.showModal();
+  else el.dlgSync.setAttribute('open', '');
+});
+
+// 二级弹窗关闭后刷新摘要行(可能刚开/关了同步)
+el.dlgSync.addEventListener('close', () => {
+  renderSyncEntry();
+});
+
 /* 同步开关:只改 settings.sync.enabled(主密码/userId 都不进 settings)。开=展开主密码组并聚焦;关=清主密码(内存 + sessionStorage)。 */
 el.optSyncEnabled.addEventListener('change', () => {
   data.settings.sync.enabled = el.optSyncEnabled.checked;
   if (el.optSyncEnabled.checked) {
     ensureSyncUserId();
     if (syncCoordinator) {
-      syncCoordinator.configure({ enabled: true, userId: syncUserId, passphrase: syncMasterPass });
+      syncCoordinator.configure({ enabled: true, userId: syncUserId, passphrase: passphraseUsable() ? syncMasterPass : '' });
     }
     persist();
     renderSettingsForm();
@@ -1187,7 +1284,9 @@ el.optSyncMaster.addEventListener('input', () => {
   syncMasterPass = el.optSyncMaster.value;
   saveSyncPass(syncMasterPass);
   // 每次变更都会让旧身份上下文的排队/在途任务失效;新密码必须重新 pull 验证后才可 PUT。
-  if (syncCoordinator) syncCoordinator.setPassphrase(syncMasterPass);
+  // 强度不达标时给编排器空串:宁可"没有主密码"也不拿弱密码去加密真实数据。
+  if (syncCoordinator) syncCoordinator.setPassphrase(passphraseUsable() ? syncMasterPass : '');
+  renderPassHint();
   updateSyncButtonLabel();
   updateSyncControls();
 });
@@ -1195,13 +1294,16 @@ el.optSyncMaster.addEventListener('input', () => {
 el.optSyncMaster.addEventListener('change', () => {
   syncMasterPass = el.optSyncMaster.value;
   saveSyncPass(syncMasterPass);
-  if (syncCoordinator) syncCoordinator.setPassphrase(syncMasterPass);
+  if (syncCoordinator) syncCoordinator.setPassphrase(passphraseUsable() ? syncMasterPass : '');
+  renderPassHint();
   updateSyncButtonLabel();
   updateSyncControls();
-  if (syncMasterPass) {
-    syncNowState(syncEnabled() ? '主密码已记录,点「同步」按钮开始' : '已记录主密码,启用同步后生效');
-  } else {
+  if (!syncMasterPass) {
     syncNowState('请先输入主密码');
+  } else if (!passphraseUsable()) {
+    syncNowState('主密码强度不够,暂不能同步', 'sync-err');
+  } else {
+    syncNowState(syncEnabled() ? '主密码已记录,点「同步」按钮开始' : '已记录主密码,启用同步后生效');
   }
 });
 
@@ -1260,6 +1362,41 @@ el.btnSyncLink.addEventListener('click', () => {
   updateSyncButtonLabel();
   updateSyncControls();
   syncNowState('已关联 · 点「立即同步」拉取另一台设备的数据');
+});
+
+/*
+ * 解密失败的两条出路。没有它们,记错/改过主密码的用户会永久卡在「主密码不符」:
+ * 门闸(decryptFailed)锁死一切 push 是对的 —— 它防的是用错密码覆盖云端 ——
+ * 但对本人来说必须存在一个「我确认就是要重新开始」的显式开关。
+ */
+el.btnSyncOverwrite.addEventListener('click', () => {
+  if (!syncCoordinator) return;
+  if (!window.confirm(
+    '远端那份数据将被本机数据整个覆盖,且无法找回。\n\n'
+    + '(本机记录不受影响。如果只是主密码打错了,请先取消并重新输入。)\n\n确定覆盖?',
+  )) return;
+  showSyncRecover(false);
+  void syncCoordinator.overwriteRemote();
+});
+
+/* 换新桶:远端那份就此弃用(留在服务器上但再也不去读),本机换一个全新 ID 重新开始。 */
+el.btnSyncNewId.addEventListener('click', () => {
+  if (!window.confirm('将为本机生成一个全新的同步 ID,原来那份远端数据不再关联。\n\n本机记录不受影响。确定?')) return;
+  const nextUserId = newUserId();
+  try {
+    localStorage.setItem(SYNC_USER_KEY, nextUserId);
+  } catch {
+    syncNowState('存储不可用', 'sync-err');
+    return;
+  }
+  syncUserId = nextUserId;
+  // 换桶 = 换身份:编排器取消所有旧 timer/fetch,新桶必须先 pull
+  if (syncCoordinator) syncCoordinator.setUserId(syncUserId);
+  if (el.optSyncUser) el.optSyncUser.value = syncUserId;
+  showSyncRecover(false);
+  updateSyncButtonLabel();
+  updateSyncControls();
+  syncNowState('已换新同步 ID · 点「立即同步」上传本机数据');
 });
 
 /* ------------------------------------------------------------------ *
@@ -1454,7 +1591,7 @@ function afterDataImport() {
 document.addEventListener('keydown', (event) => {
   if (event.code !== 'Space' && event.key !== ' ') return;
   if (event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
-  if (el.dlgSettings.open) return;
+  if (el.dlgSettings.open || el.dlgSync.open) return;
 
   // 输入框里空格就是空格;按钮/链接上空格是浏览器原生的「激活」,交给它,别按两次
   const t = event.target;
@@ -1703,20 +1840,28 @@ function clearSyncPass() {
   saveSyncPass('');
 }
 
-/** 首次启用引导:远端确认无数据(none)且主密码已输时,按钮文案改「首次同步(上传本机数据)」。 */
+/** 首次启用引导:远端确认无数据(none)且主密码可用时,按钮文案改「首次同步(上传本机数据)」。 */
 function updateSyncButtonLabel() {
   if (!el.btnSyncNow) return;
-  const firstTime = syncEnabled() && !!syncMasterPass && !!syncCoordinator && syncCoordinator.remoteEmpty;
+  const firstTime = syncEnabled() && passphraseUsable() && !!syncCoordinator && syncCoordinator.remoteEmpty;
   el.btnSyncNow.textContent = firstTime ? '首次同步(上传本机数据)' : '立即同步';
 }
 
 function updateSyncControls(busy = syncUiBusy) {
   syncUiBusy = !!busy;
   if (syncSetupWrap) syncSetupWrap.setAttribute('aria-busy', syncUiBusy ? 'true' : 'false');
-  if (el.btnSyncNow) el.btnSyncNow.disabled = syncUiBusy || !syncEnabled() || !syncMasterPass || !syncUserId;
+  // 弱主密码不给同步:此时编排器拿到的是空串,点了也只会报 missing-passphrase
+  if (el.btnSyncNow) el.btnSyncNow.disabled = syncUiBusy || !syncEnabled() || !passphraseUsable() || !syncUserId;
   if (el.btnSyncLink) el.btnSyncLink.disabled = syncUiBusy;
   if (el.optSyncLink) el.optSyncLink.disabled = syncUiBusy;
   if (el.btnSyncCopy) el.btnSyncCopy.disabled = !syncUserId;
+  if (el.btnSyncOverwrite) el.btnSyncOverwrite.disabled = syncUiBusy || !passphraseUsable() || !syncUserId;
+  if (el.btnSyncNewId) el.btnSyncNewId.disabled = syncUiBusy;
+}
+
+/** 解密失败的出路块:只在真的解不开时出现,平时不制造噪音。 */
+function showSyncRecover(show) {
+  if (el.syncRecover) el.syncRecover.hidden = !show;
 }
 
 function formatSyncTime(t) {
@@ -1776,6 +1921,8 @@ function renderSyncEvent(event) {
       break;
     case 'decrypt-failed':
       syncNowState('主密码不符,未上传(避免覆盖远端数据)', 'sync-err');
+      // 没有出路的话用户会永久卡在这条消息上:展开「解不开怎么办」
+      showSyncRecover(true);
       break;
     case 'push-rate-retry':
       syncNowState('推送过频,稍后将重新拉取并重试…', 'sync-busy');
@@ -1793,7 +1940,9 @@ function renderSyncEvent(event) {
       syncNowState('同步失败,本地数据不受影响', 'sync-err');
       break;
     case 'synced':
-      if (event.firstUpload) syncNowState('已开启同步 · 本机数据已上传', 'sync-ok');
+      showSyncRecover(false); // 通了就把出路块收起来
+      if (event.overwrote) syncNowState('已用本机数据覆盖远端', 'sync-ok');
+      else if (event.firstUpload) syncNowState('已开启同步 · 本机数据已上传', 'sync-ok');
       else if (event.conflicts > 0) syncNowState(`已合并(冲突 ${event.conflicts} 条按最新覆盖)`, 'sync-ok');
       else syncNowState('已同步', 'sync-ok');
       break;
@@ -1807,7 +1956,7 @@ function initSyncCoordinator() {
     origin: SYNC_ORIGIN,
     enabled: syncEnabled(),
     userId: syncUserId,
-    passphrase: syncMasterPass,
+    passphrase: passphraseUsable() ? syncMasterPass : '',
     readData: () => ({ records: data.records, settings: data.settings }),
     applyMergedRecords: (records) => {
       data.records = Array.isArray(records) ? records : [];
@@ -1825,7 +1974,7 @@ function initSyncCoordinator() {
 
 /** 打开应用时执行同一条安全流水线:pull→merge→push。新会话无主密码则安静降级本地。 */
 function syncOnOpen() {
-  if (!syncCoordinator || !syncEnabled() || !syncMasterPass || !navigator.onLine) return;
+  if (!syncCoordinator || !syncEnabled() || !passphraseUsable() || !navigator.onLine) return;
   void syncCoordinator.syncNow({ source: 'open' });
 }
 

@@ -1,4 +1,4 @@
-# 交接说明(2026-08-05)
+# 交接说明(2026-08-05,§1/§5 已更新至 2026-08-08)
 
 接手 agent 请先读 **CLAUDE.md**(约定/命令)、**SPEC.md**(契约,DOM id 表 70 个)、**DEVELOPMENT.md**(决策记录 D1–D29,尤其 **D28** 计数 Worker 的 Hibernation 坑)。本文只补三件事:**现状快照**、**反馈 backlog**、**计数放置调研**。
 
@@ -7,10 +7,11 @@
 | 项 | 现状 |
 |---|---|
 | 产品 | 提肛陪伴(KegelMate)PWA。落地页 `https://kegel.eigentime.org/`,应用 `/app/` |
-| 架构 | `core/` 纯函数层 + `app.js` 胶水层,零依赖、无构建;唯一后端 = 计数 Worker(`worker/`) |
-| 最近完成 | ① 计数「0人」bug 修复(worker 改走 WebSocket Hibernation API,线上已验证 `doing:1`);② N1 训练完成分享卡(canvas 图卡→系统分享/预览保存);③ 落地页删「换了域名」迁移段 |
-| git | `main` 全绿。`ffbadd9`(功能+修复)、`dd9a2de`(D28/D29 文档)之后工作区干净 |
+| 架构 | `core/` 纯函数层 + `app.js` 胶水层,零依赖、无构建;**两个** opt-in 后端:计数 Worker(`worker/`)+ 多端同步(`sync-server/`,端到端加密只存密文) |
+| 最近完成 | (2026-08-08)① 同步安全加固四项 + 解密失败逃生出口;② 设置精简 + 训练页进度环;③ 升级提示可达 + 统一 toast 通知位(D37);④ 孤儿桶治理 DELETE + TTL 清扫(D38) |
+| git | `main` 全绿,工作区干净。最新 `87d6d6b`(孤儿桶治理) |
 | 计数 Worker | `tigang-counter.eigentime.workers.dev`;CI 有 `CLOUDFLARE_*` secrets,**每次 push 自动重部署** |
+| 同步后端 | `https://sync.eigentime.org` → 甲骨文机 systemd `sync`。**CI 不管它**,手工部署:机上 `cd ~/tigang-companion && git pull` → `sudo cp sync-server/server.mjs /opt/sync-server/` → `sudo systemctl restart sync`。`/opt/sync-server` **不是 git 仓库**(在那里 `git pull` 会 fatal)。步骤见 DEPLOY-SYNC.md 阶段 2 |
 
 ## 2. 反馈 backlog(产品群,2026-08-04/05)
 
@@ -42,7 +43,7 @@
 
 ## 4. 接手须知
 
-- **必读**:CLAUDE.md(约定/命令)→ SPEC.md(契约)→ DEVELOPMENT.md(D1–D29,重点 D28)。
+- **必读**:CLAUDE.md(约定/命令)→ SPEC.md(契约)→ DEVELOPMENT.md(D1–D38;重点 D28 计数 Worker 的 Hibernation 坑、D35 为什么有 UUID 还要主密码、D38 孤儿桶两道防线)。
 - **命令**:`npm test`(core/ 改动必跑,裸 `node --test`);`node tools/build-site.mjs`(组装 dist);`git push`(CI 自动:测试→Pages→计数 Worker,Worker 需 `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets,已配置)。
 - **红线**:零依赖(不加 npm 包/CDN);`core/` 禁 DOM / `Date.now()` / `localStorage`;外部服务只有计数 Worker 与 opt-in 密文同步后端;发版升 `sw.js` 的 `CACHE_NAME`;同步 PUT 不得绕过 `sync/coordinator.mjs`;改接口同步 SPEC;「维持」`holdSec` 是全局键,`holdSec=0` 必须等价 v1 两段式。
 - **计数 Worker 本地验证**:`cd worker && npx wrangler dev`(会生成 `worker/.wrangler/`,已 gitignore);协议 + Hibernation 坑见 `worker/worker.js` 顶部注释与 D28。改 WebSocket 逻辑前**先确认走类方法还是 addEventListener**。
@@ -50,7 +51,32 @@
 
 ## 5. 交接时已验证
 
+### 2026-08-08 更新
+
+- 测试:`npm test` **121 全绿**;`sw.js` = `tigang-v20`;CI 绿(Test & Deploy 37s)。
+- 同步后端已部署并**实机验活**:`DELETE /sync?key=<合法 UUID>` 回 `{"ok":true}`(旧码回
+  405 `{"error":"method"}` —— 这是判断新码是否生效的最快探针;`/health` **区分不出新旧**,
+  那个端点一直都在)。线上库:3 个桶、0 个孤儿,首次清扫 no-op(journal 无 `sweep` 行)。
+- 孤儿桶治理也做了本机端到端验收(不只静态断言):建桶→GET→DELETE→GET(none)→再 DELETE
+  仍 ok;非 UUID 的 DELETE 仍 400 `bad-key`;preflight `Allow-Methods` 含 DELETE;PATCH 仍 405;
+  TTL 侧塞 200 天前 + 刚更新两桶,重启后只剩新的(`sweep removed=1 ttl_days=180`);
+  `ORPHAN_TTL_MS=1天` 验活跃桶不被误删;真 `syncDelete`(不 stub fetch)全链路含服务器不可达。
+
+**⚠️ 未在真机验过(只做过静态契约断言)**:① 弹窗里 toast 的可见性(top layer 那个修法);
+② 训练页进度环观感。下次有真机信号优先看这两个。
+
+**查孤儿数 / 看清扫**(注意:用户终端 MobaXterm 会吃掉 `*`、把 `%` 变成 `%%`。
+`strftime('%%s','now')` 返回字面量 `"%s"`,比较恒假、**结果恒为 0**,是会给假阴性的静默坑。
+所以下面这条刻意不含 `*` 与 `%`):
+
+```bash
+sqlite3 /opt/sync-server/data/sync.db "SELECT COUNT(1) FROM blobs WHERE datetime(updated_at / 1000, 'unixepoch') < datetime('now', '-180 days');"
+sudo journalctl -u sync --since '1 day ago' | grep sweep   # 无输出 = 没东西可删
+```
+
+### 2026-08-05 原记录
+
 - 计数:训练会话存活期间线上 `/stats` 返回 `doing:1`(2026-08-05 实测)。
 - 落地页:无「换了域名」段落;应用:`btn-share`/`dlg-share` 已上线;`sw.js` = `tigang-v12`(R2/R3 发版已升)。
-- 测试:`npm test` 当前 107 全绿;`node --check` 全过;构建正常;app.js 引用的 81 个 DOM id 全部存在于 index.html,模块依赖图全部进入预缓存。
+- 测试:`npm test` 当时 107 全绿;`node --check` 全过;构建正常;app.js 引用的 81 个 DOM id 全部存在于 index.html,模块依赖图全部进入预缓存。
 - R2/R3 轻提示:一次性脚本喂 `maybePhaseTick` 真实源码,确认 prepare 3 声倒数、rest 呼吸拍 392/330 交替 + 末 3 秒 440、后台跳变不补拍、暂停静音、开关关闭全静、用力阶段无声、短休息(1–8s)退化为纯倒数。

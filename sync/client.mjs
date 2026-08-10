@@ -44,7 +44,7 @@ export async function syncPull(origin, userId, { signal } = {}) {
 /**
  * PUT <origin>/sync?key=<userId> body {blob} → 推密文(覆盖,last-write-wins)。
  * blob 可以是 encryptBlob 的对象或已序列化字符串,上线前统一序列化为密文 JSON 串(server 契约是字符串)。
- * 成功: { ok:true };限流: { ok:false, error:'rate' };超限: { ok:false, error:'too-big' };网络/取消: { ok:false, error:'network' }
+ * 成功: { ok:true };限流: { ok:false, error:'rate' };超限: { ok:false, error:'too-big'|'quota' };网络/取消: { ok:false, error:'network' }
  */
 export async function syncPush(origin, userId, blob, { signal } = {}) {
   try {
@@ -57,6 +57,7 @@ export async function syncPush(origin, userId, blob, { signal } = {}) {
     }, signal);
     if (network) return { ok: false, error: 'network' };
     if (res.status === 413) return { ok: false, error: 'too-big' };
+    if (res.status === 507) return { ok: false, error: 'quota' };
     if (res.status === 429) return { ok: false, error: 'rate' };
     if (!res.ok) return { ok: false, error: 'unknown' };
     const data = await res.json();

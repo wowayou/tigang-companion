@@ -39,7 +39,7 @@
 
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,6 +50,9 @@ const DB_PATH =
 
 const MAX_BLOB_BYTES = 1024 * 1024; // 1MB 密文上限
 const MAX_BODY_BYTES = MAX_BLOB_BYTES + 4096; // JSON 外壳余量
+// 这是个人服务,给存储设置总闸,避免公开接口被批量生成 UUID 填满磁盘。
+const MAX_BUCKETS = positiveIntEnv('MAX_BUCKETS', 10_000);
+const MAX_DB_BYTES = positiveIntEnv('MAX_DB_BYTES', 10 * 1024 * 1024 * 1024);
 // 同 userId PUT 最小间隔。3s 而非 10s:多设备共用同一个 userId(手填同步 ID 后)
 // 会共享这个额度——手机推完 10s 内打开电脑就撞 429,同步显得"偶尔不灵"。
 // 防滥用的本意是拦脚本狂刷,3s 足够;客户端收到 rate 还会自动延后重试一次。
@@ -66,6 +69,11 @@ const ORPHAN_TTL_MS = Number(process.env.ORPHAN_TTL_MS || 180 * 24 * 60 * 60 * 1
 const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 每天扫一次(启动时先扫一次)
 // userId 必须是 UUID(客户端 newUserId() 的产物);任意字符串不许建桶。
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function positiveIntEnv(name, fallback) {
+  const value = Number(process.env[name]);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
 
 /* ---------------- SQLite ---------------- */
 
@@ -170,6 +178,25 @@ function handlePutSync(req, res, key) {
   }
   if (Buffer.byteLength(blob, 'utf8') > MAX_BLOB_BYTES) {
     send(res, 413, { ok: false, error: 'too-big' });
+    return;
+  }
+
+  // 新桶和数据库增长都受总闸保护。达到上限时保留现有数据,拒绝本次写入。
+  if (!row) {
+    const count = Number(db.prepare('SELECT COUNT(*) AS n FROM blobs').get().n || 0);
+    if (count >= MAX_BUCKETS) {
+      send(res, 507, { ok: false, error: 'quota' });
+      return;
+    }
+  }
+  let dbBytes = 0;
+  try {
+    dbBytes = statSync(DB_PATH).size;
+  } catch {
+    // 数据库刚创建或 stat 短暂失败时,让 SQLite 自己处理写入。
+  }
+  if (dbBytes > 0 && dbBytes + Buffer.byteLength(blob, 'utf8') > MAX_DB_BYTES) {
+    send(res, 507, { ok: false, error: 'quota' });
     return;
   }
 

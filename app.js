@@ -2207,6 +2207,9 @@ function renderSyncEvent(event) {
     case 'push-too-big':
       syncNowState('数据过大,无法同步', 'sync-err');
       break;
+    case 'push-quota':
+      syncNowState('同步服务存储已达上限,本地数据不受影响', 'sync-err');
+      break;
     case 'push-failed':
       syncNowState('推送失败,本地数据不受影响', 'sync-err');
       break;

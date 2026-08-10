@@ -67,6 +67,19 @@ test('syncPush 保留 429/413 错误语义', async () => {
   }
 });
 
+test('syncPush 保留服务端容量上限错误语义', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('{}', { status: 507 });
+  try {
+    assert.deepEqual(
+      await syncPush('https://sync.example.test', USER_ID, { ciphertext: true }),
+      { ok: false, error: 'quota' },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('syncDelete 用 DELETE 方法打对 key,成功返回 ok', async () => {
   const originalFetch = globalThis.fetch;
   let seenUrl;

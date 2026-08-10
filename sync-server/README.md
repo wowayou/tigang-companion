@@ -24,6 +24,7 @@ PUT/GET/DELETE 覆盖式存储加密 blob,后端**永不解密、不解析内容
 - 同 userId PUT > 1 次/3 秒 → `429 {ok:false, error:'rate'}`(用 `updated_at` 判,成功写入才刷新窗口)。
 - 单 IP 全部端点 > 20 次/分 → `429`(内存 Map + 时间窗,进程重启清零;单机够用)。
 - nginx 层另有 `limit_req zone=sync burst=20 nodelay` 兜底。
+- 全局桶数或 SQLite 文件达到上限 → `507 {ok:false,error:'quota'}`;现有数据保留,客户端显示容量已满。
 
 ## SQLite 文件
 
@@ -61,6 +62,8 @@ PUT/GET/DELETE 覆盖式存储加密 blob,后端**永不解密、不解析内容
 | `PORT` | `8787` | nginx `proxy_pass` 指向它 |
 | `DB_PATH` | 本文件同目录 `data/sync.db` | SQLite 文件位置 |
 | `ORPHAN_TTL_MS` | `180` 天 | 孤儿桶清扫阈值:超过这么久未 PUT 的桶会被删除 |
+| `MAX_BUCKETS` | `10000` | 允许保留的同步桶总数 |
+| `MAX_DB_BYTES` | `10GiB` | SQLite 文件大小上限,达到后拒绝 PUT |
 
 ## 部署入口
 

@@ -295,6 +295,8 @@ export class SyncCoordinator {
           }
         } else if (pushed.error === 'too-big') {
           this.emit('push-too-big', { source });
+        } else if (pushed.error === 'quota') {
+          this.emit('push-quota', { source });
         } else {
           this.emit('push-failed', { source });
         }

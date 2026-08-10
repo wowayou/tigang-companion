@@ -1,8 +1,146 @@
 # 同步后端部署 + 端到端验收清单
 
-> 一次性操作。做完同步就上线。所有动作都在甲骨文凤凰城实例 + Cloudflare DNS 控制台上,不需要改代码。
-> 当前代码基线:后端 `sync-server/`、安全同步编排器 `sync/coordinator.mjs`、sw v17;发版前以 `main` 最新 CI 为准。
+> 首次部署与现有服务升级手册。首次部署需要甲骨文实例 + Cloudflare DNS/1Panel;现有服务增加容量保护时按下面的「快速升级」执行。
+> 当前代码基线:后端 `sync-server/`、安全同步编排器 `sync/coordinator.mjs`、sw v21;发版前以 `main` 最新 CI 为准。
 > 相关文档:`sync-server/README.md`(后端细节)、`SYNC-SPEC.md`(设计)、`SYNC-OPTIMIZE.md`(前端体验)。
+
+---
+
+## 现有服务器快速升级:增加容量保护(2026-08-10)
+
+适用条件:同步服务已经在 `/opt/sync-server` 运行,现在只升级后端容量保护和前端错误提示。此次升级**不改 DNS、不改 1Panel/OpenResty、不迁移或替换 `sync.db`**。重启同步服务时会有几秒不可用,客户端会保留本地数据并在下次同步重试。
+
+本次发布涉及以下文件:
+
+```text
+# 服务器后端
+sync-server/server.mjs
+sync-server/sync.service
+
+# 前端静态站点(CI 随 main 发布)
+app.js
+sync/client.mjs
+sync/coordinator.mjs
+sw.js                       # CACHE_NAME=tigang-v21
+
+# 运维仓库
+ansible/group_vars/all.yml  # 本地真实配置,手工补 /opt/sync-server/data
+```
+
+### 1. WSL 本地:检查并发布代码
+
+在 `tigang-companion` 仓库执行:
+
+```bash
+cd /home/forbackup/Dev/my-projects/tigang-companion
+npm test
+git diff --check
+git status --short
+```
+
+检查修改内容无误后,按正常 Git 流程提交并推送 `main`。现有 CI 会发布前端;发布完成后浏览器会收到 `tigang-v21` Service Worker 更新提示。不要只上传 `app.js`:四个前端文件必须一起发布,否则旧缓存可能继续运行。
+
+本次改动可用显式文件列表提交,不会把其它工作区改动带进去:
+
+```bash
+git add DEPLOY-SYNC.md app.js sw.js \
+  sync-server/README.md sync-server/server.mjs sync-server/sync.service \
+  sync/client.mjs sync/coordinator.mjs tests/sync-client.test.mjs
+git commit -m "sync: add storage quota protection"
+git push origin main
+```
+
+### 2. 甲骨文服务器:更新后端两个文件
+
+SSH 登录后执行。以下命令假定服务器上代码仓库在 `~/tigang-companion`;若实际路径不同,只替换这个源路径,目标路径不要改。
+
+```bash
+cd ~/tigang-companion
+git pull --ff-only
+
+# 部署前检查 Node 24 和新代码语法
+/opt/node24/bin/node --version
+/opt/node24/bin/node --check sync-server/server.mjs
+
+# 给旧程序和 unit 留一份可回滚副本;不碰 sync.db
+sudo cp /opt/sync-server/server.mjs /opt/sync-server/server.mjs.pre-quota-20260810
+sudo cp /etc/systemd/system/sync.service /etc/systemd/system/sync.service.pre-quota-20260810
+
+# 安装新后端与 systemd unit
+sudo install -o drbsops -g drbsops -m 0644 \
+  sync-server/server.mjs /opt/sync-server/server.mjs
+sudo install -o root -g root -m 0644 \
+  sync-server/sync.service /etc/systemd/system/sync.service
+
+sudo chown -R drbsops:drbsops /opt/sync-server/data
+sudo systemctl daemon-reload
+sudo systemctl restart sync
+```
+
+新 unit 默认启用:
+
+```text
+MAX_BUCKETS=10000
+MAX_DB_BYTES=10737418240    # 10 GiB
+```
+
+### 3. 服务器验收
+
+```bash
+systemctl status sync --no-pager
+journalctl -u sync -n 30 --no-pager
+systemctl show sync -p Environment
+curl -fsS http://172.17.0.1:8787/health
+curl -fsS https://sync.eigentime.org/health
+ss -ltnp | grep ':8787'
+```
+
+验收标准:
+
+- `sync.service` 是 `active (running)`。
+- 两个 health 请求都返回 `{"ok":true}`。
+- Environment 中存在 `MAX_BUCKETS=10000` 与 `MAX_DB_BYTES=10737418240`。
+- 8787 只监听 `172.17.0.1`,不是 `0.0.0.0`。
+- `journalctl` 没有 `ERR_UNKNOWN_BUILTIN_MODULE`、权限错误或反复重启。
+
+### 4. WSL 运维仓库:显式纳入 DRBS
+
+`server-ops-oracle-always-free/ansible/group_vars/all.yml` 是被 Git 忽略的真实配置,不会被示例文件自动替换。在它的 `drbs_restic_backup_paths` 下手工加入:
+
+```yaml
+  - /opt/sync-server/data
+```
+
+然后在运维仓库根目录执行:
+
+```bash
+./drbs.sh check --ci
+./drbs.sh bootstrap-check
+./drbs.sh bootstrap
+./drbs.sh backup-scope
+./drbs.sh path-audit
+./drbs.sh backup-start
+./drbs.sh backup-watch
+```
+
+`backup-scope` 应列出 `/opt/sync-server/data`,`path-audit` 不应把它标成 `MISSING`。当前 profile 已有 `/opt` 兜底,所以漏做这一步不会立刻丢备份,但显式路径便于审计和恢复。
+
+### 5. 前端验收
+
+CI 发布结束后打开应用,接受更新提示并刷新。确认浏览器 DevTools/Application 中当前 Service Worker/Cache 是 `tigang-v21`,再执行一次「立即同步」。正常使用时不应看到容量错误;只有服务端达到桶数或数据库上限才显示「同步服务存储已达上限,本地数据不受影响」。
+
+### 回滚(仅在新服务无法启动时)
+
+```bash
+sudo cp /opt/sync-server/server.mjs.pre-quota-20260810 /opt/sync-server/server.mjs
+sudo cp /etc/systemd/system/sync.service.pre-quota-20260810 /etc/systemd/system/sync.service
+sudo chown drbsops:drbsops /opt/sync-server/server.mjs
+sudo systemctl daemon-reload
+sudo systemctl restart sync
+curl -fsS http://172.17.0.1:8787/health
+```
+
+回滚同样不需要碰 `/opt/sync-server/data/sync.db`。若旧副本不存在,不要猜路径或删除数据库,先查看 `journalctl -u sync -n 100 --no-pager`。
 
 ---
 
@@ -15,7 +153,7 @@
 | 反向代理 | **Docker 里的 OpenResty**(配置在 `/opt/1panel/apps/openresty/openresty/conf`),**没有原生 nginx**(`nginx -v` 报 command not found) |
 | 服务托管 | 1Panel 应用走 Docker;系统级服务走 systemd(如 `hysteria-server.service`) |
 | 证书 | 1Panel 面板内置「证书」功能(自动申请/续期),**不用 certbot** |
-| 备份 | DRBS/restic 增量加密 → Cloudflare R2,路径在 `server-ops-oracle-always-free` 仓库的 `ansible/roles/drbs_base/defaults/main.yml`。**已含 `/opt`,故 `/opt/sync-server/data` 会被兜底备份**——但按该仓库规矩仍应显式声明 |
+| 备份 | DRBS/restic 增量加密 → Cloudflare R2,真实配置在 `server-ops-oracle-always-free/ansible/group_vars/all.yml`。**已含 `/opt`,故 `/opt/sync-server/data` 会被兜底备份**——但按该仓库规矩仍应显式声明 |
 | 登录用户 | `drbsops`(**不是 `ubuntu`**——`sync.service` 里的 User/Group 要改成 drbsops) |
 | 运维红线 | 该仓库 AGENTS.md:不改 OpenResty/1Panel 配置、不新增监听端口须谨慎、live 操作由操作者本人在面板执行 |
 
@@ -93,7 +231,7 @@ ss -ltnp | grep ':8787'                       # 应监听 172.17.0.1:8787,不是
 这台机器已有 DRBS(restic 增量加密 → Cloudflare R2),备份路径含 `/opt`,所以 `/opt/sync-server/data/sync.db` **会被兜底备份**。按 `server-ops-oracle-always-free` 仓库的规矩(新服务应声明精确路径),在该仓库补一行:
 
 ```yaml
-# ansible/roles/drbs_base/defaults/main.yml → drbs_restic_backup_paths 下加:
+# ansible/group_vars/all.yml → drbs_restic_backup_paths 下加:
   - /opt/sync-server/data
 ```
 然后在 WSL 控制端 `./drbs.sh bootstrap` 同步配置、`./drbs.sh backup-start` 验证一次。
@@ -165,7 +303,7 @@ ss -ltnp | grep ':8787'                       # 应监听 172.17.0.1:8787,不是
 
 ## 阶段 5:发版收尾
 
-- [ ] 前端 sw.js 已是 `tigang-v17`,且预缓存同时包含 `sync/client.mjs` 与 `sync/coordinator.mjs`。push 后 CI 自动部署 + 跑测试。
+- [ ] 前端 sw.js 已是 `tigang-v21`,且预缓存同时包含 `sync/client.mjs` 与 `sync/coordinator.mjs`。push 后 CI 自动部署 + 跑测试。
 - [ ] 应用发布后,真机(尤其 iPhone Safari)过一遍 B/C 两条(端到端 + 解密失败降级)——iOS 是这功能最该确认的平台。
 
 ---

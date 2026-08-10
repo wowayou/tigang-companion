@@ -1,4 +1,4 @@
-# 交接说明(2026-08-05,§1/§5 已更新至 2026-08-08)
+# 交接说明(2026-08-05,§1/§5 已更新至 2026-08-10)
 
 接手 agent 请先读 **CLAUDE.md**(约定/命令)、**SPEC.md**(契约,DOM id 表 70 个)、**DEVELOPMENT.md**(决策记录 D1–D29,尤其 **D28** 计数 Worker 的 Hibernation 坑)。本文只补三件事:**现状快照**、**反馈 backlog**、**计数放置调研**。
 
@@ -8,10 +8,10 @@
 |---|---|
 | 产品 | 提肛陪伴(KegelMate)PWA。落地页 `https://kegel.eigentime.org/`,应用 `/app/` |
 | 架构 | `core/` 纯函数层 + `app.js` 胶水层,零依赖、无构建;**两个** opt-in 后端:计数 Worker(`worker/`)+ 多端同步(`sync-server/`,端到端加密只存密文) |
-| 最近完成 | (2026-08-08)① 同步安全加固四项 + 解密失败逃生出口;② 设置精简 + 训练页进度环;③ 升级提示可达 + 统一 toast 通知位(D37);④ 孤儿桶治理 DELETE + TTL 清扫(D38) |
-| git | `main` 全绿,工作区干净。最新 `87d6d6b`(孤儿桶治理) |
+| 最近完成 | (2026-08-10)同步后端增加 `MAX_BUCKETS=10000` + `MAX_DB_BYTES=10GiB` 存储总闸,客户端保留 `507 quota` 语义并给出明确提示;此前孤儿桶 DELETE + TTL 清扫仍保留 |
+| git | `main` 全绿,工作区干净。容量保护基线 `47c7652` |
 | 计数 Worker | `tigang-counter.eigentime.workers.dev`;CI 有 `CLOUDFLARE_*` secrets,**每次 push 自动重部署** |
-| 同步后端 | `https://sync.eigentime.org` → 甲骨文机 systemd `sync`。**CI 不管它**,手工部署:机上 `cd ~/tigang-companion && git pull` → `sudo cp sync-server/server.mjs /opt/sync-server/` → `sudo systemctl restart sync`。`/opt/sync-server` **不是 git 仓库**(在那里 `git pull` 会 fatal)。步骤见 DEPLOY-SYNC.md 阶段 2 |
+| 同步后端 | `https://sync.eigentime.org` → 甲骨文机 systemd `sync`。容量保护已于 2026-08-10 手工部署并验活;Node 24、两个 quota 环境变量、内外 `/health` 与 docker0 监听均通过。**CI 不管后端部署**,步骤见 DEPLOY-SYNC.md |
 
 ## 2. 反馈 backlog(产品群,2026-08-04/05)
 
@@ -50,6 +50,19 @@
 - **建议接手顺序**:① ~~音效 2/3~~ ✅ 已完成(D30)→ ② 导入导出跨设备 1 → ③ 计数放置 5(已有调研,可立项)→ ④ 排行榜 4(维持 gated,不动)。
 
 ## 5. 交接时已验证
+
+### 2026-08-10 更新
+
+- 测试:`npm test` **122 全绿**;`sw.js` = `tigang-v21`;GitHub `Test & Deploy` 全绿,Pages/Worker 已发布。
+- 同步后端容量保护已在生产机生效:`sync.service` active,Node 24,环境含 `MAX_BUCKETS=10000` /
+  `MAX_DB_BYTES=10737418240`;内外 `/health` 都是 `{"ok":true}`,8787 只监听 docker0 网关。
+- DRBS **没有完成显式路径部署**:本地 ignored `all.yml` 已加 `/opt/sync-server/data`,但 Ansible
+  `bootstrap-check/bootstrap` 卡在 sudo privilege-escalation prompt;服务器 `restic-paths.txt` 仍是 21 条旧清单,
+  没有独立同步目录条目。
+- 现场决定是等待 2026-08-11 定时备份。旧清单已有 `/opt`,所以预期仍覆盖 `sync.db`,但必须以最新 restic
+  snapshot 实际出现 `/opt/sync-server/data/sync.db` 才能证明;在此之前只能写「有兜底预期」,不能写「备份已验收」。
+- 成功/失败判据记录在运维仓库 `DRBS_RUNBOOK.zh-CN.md`「定时备份成功/失败判定」;显式路径 bootstrap 与
+  Ansible sudo 问题即使 snapshot 成功也仍是未关闭维护项。
 
 ### 2026-08-08 更新
 

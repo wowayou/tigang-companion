@@ -125,6 +125,13 @@ ss -ltnp | grep ':8787'
 
 `backup-scope` 应列出 `/opt/sync-server/data`,`path-audit` 不应把它标成 `MISSING`。当前 profile 已有 `/opt` 兜底,所以漏做这一步不会立刻丢备份,但显式路径便于审计和恢复。
 
+> **2026-08-10 现场状态**:生产同步后端已升级并验活;本地 `all.yml` 已加同步目录,但 Ansible
+> `bootstrap-check/bootstrap` 因 sudo privilege-escalation prompt 超时而失败。服务器部署清单仍是 21 条旧路径,
+> 没有独立 `/opt/sync-server/data`;旧清单中的 `/opt` 理论上覆盖数据库。决定等待 2026-08-11 定时备份,
+> 以 `Result/ExecMainStatus`、新 summary/snapshot、journal 和 `restic ls latest` 实际出现 `sync.db` 四项共同验收。
+> 即使 snapshot 成功,也只能证明 `/opt` 兜底有效;显式路径和 Ansible sudo 仍待修。完整判据见运维仓库
+> `DRBS_RUNBOOK.zh-CN.md`「定时备份成功/失败判定」。
+
 ### 5. 前端验收
 
 CI 发布结束后打开应用,接受更新提示并刷新。确认浏览器 DevTools/Application 中当前 Service Worker/Cache 是 `tigang-v21`,再执行一次「立即同步」。正常使用时不应看到容量错误;只有服务端达到桶数或数据库上限才显示「同步服务存储已达上限,本地数据不受影响」。

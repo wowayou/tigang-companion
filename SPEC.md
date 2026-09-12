@@ -25,6 +25,7 @@ tigang-companion/
 │   ├── stats.js          # 打卡/连续天数/热力图数据(纯函数)
 │   ├── storage.js        # localStorage 读写
 │   ├── achievements.js   # 成就徽章 / 今日目标(纯函数)
+│   ├── install.js        # 安装引导纯决策(N4:何时显示、用哪种变体)
 │   └── sync.js           # 多端同步纯函数:端到端加密 + LWW 合并(可迁移到 time-logger)
 ├── ROADMAP.md            # 增长机制路线图(产品向,不落代码;N 系列为准)
 ├── site/                 # 落地页(部署到站点根路径;不是 PWA 的一部分,不进 sw.js 预缓存)
@@ -441,7 +442,7 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 81 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 85 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -449,6 +450,7 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 | 分区 | id |
 |---|---|
 | 顶栏 | `btn-settings` `streak-chip` `streak-chip-num` `site-stats` `st-doing` `st-visits` |
+| 安装引导 | `install-hint` `install-hint-steps` `btn-install` `btn-install-dismiss` |
 | tab 与面板 | `tab-train` `tab-stats` `tab-knowledge` `panel-train` `panel-stats` `panel-knowledge` |
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
 | 引导圆与进度 | `coach-ring` `coach-circle`(button) `phase-label` `countdown` `set-progress` |
@@ -493,6 +495,29 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 - 网络:WS 心跳每 10s(`ping`),重连指数退避封顶 30s;`document.hidden` 时断开连接、回前台 `fetchStats()` + 重连;`pagehide` 关闭。
 - Worker 端点:`GET /stats` → `{ online, doing, visits }`;`POST /visit`(body `{ visitorId }`)→ `{ visits }`;`WS /ws` 双向协议见 `worker/worker.js` 顶部注释。CORS 全开。
 - `worker/` 三个文件是**部署源,不是被 PWA fetch 的静态资源**,不得加进 sw.js 预缓存清单(sw.js 只预缓存应用自身文件)。
+
+### §8.aa 安装引导(N4,ROADMAP)
+
+训练页顶部一张可关闭的薄卡 `#install-hint`(teal 淡底,与完成面板同一家族),三个状态来源:
+
+- **触发**:累计**完成**训练次数 ≥ 3(`totals(records).finishedSessions`,不用「打开次数」——完成才是用过的诚实信号,且不新增计数器)。纯决策在 `core/install.js` 的 `installHintDecision()`,输入全部注入,可全量单测(`tests/install.test.mjs`)。
+- **已安装** = 以独立窗口运行:`navigator.standalone === true`(iOS 主屏)或 `matchMedia('(display-mode: standalone), (display-mode: minimal-ui), (display-mode: fullscreen)')` 命中;另有 `appinstalled` 事件在本次会话内直接置位。**每次启动现检,不持久化**。
+- **已关闭** = 用户点过 `#btn-install-dismiss`(**永久**,不做「过阵子再问」)。持久层是设备本地 key `tigang_install_dismissed`,**不进 settings**——settings 会随端到端同步/备份走,A 设备「已安装/已关闭」不该压住 B 设备的引导(与 `tigang_sync_user` 同一先例)。
+
+三个变体(按优先级):
+
+| 变体 | 条件 | 表现 |
+|---|---|---|
+| `prompt` | 已捕获 `beforeinstallprompt` | `#btn-install`「立即安装」一键调起;`userChoice` 为 dismissed 时降级为手动步骤(`prompt()` 只能消费一次,用后即弃) |
+| `ios` | iOS 且非独立窗口 | 手动步骤:分享图标 → 「添加到主屏幕」 |
+| `android` | Android UA 且无安装事件(如 Firefox) | 手动步骤:浏览器菜单 → 「安装应用 / 添加到主屏幕」 |
+| (不显示) | 桌面无安装能力 / 未达阈值 / 已安装 / 已关闭 | 不骚扰 |
+
+硬约束:
+
+1. **单一安装入口**:`beforeinstallprompt` 一律 `preventDefault()` 收掉浏览器自带迷你条,全站只保留本卡一个入口(与「统一轻通知位」同一条规矩)。
+2. **显隐唯一驱动点在 `renderTrain()`**:`hidden = isRunning(session) || !installDecision.show` —— 训练中一律隐藏,与 R5 计数徽标同一条零打扰规矩;`refreshInstallHint()` 只重算决策与卡内文案,不直接定 hidden。
+3. **重算时机**:启动(`renderStats()` 首刷)、记录写入后可能跨过阈值(`renderStats()` 末尾)、`beforeinstallprompt` / `appinstalled` / 关闭 / 安装按钮点击后。
 
 ## §9 PWA(sw.js + manifest.webmanifest + icon.svg + icon-*.png)
 
@@ -577,5 +602,9 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
     - **破坏性操作给撤销**:清除数据、导入「替换」都是不可逆整体覆盖,连续打卡是几十天攒的。快照只在内存(刷新即失效),撤销**不恢复同步身份**——清除时主密码已丢,只恢复 userId 会让编排器拿半套身份打后端。
     - **解密失败改为主动提示**:同步多在后台跑,弹窗关着时状态行没人看得见,而它会让同步永久停摆到用户处理为止;弹窗开着则不弹,不说两遍。
     - 导入的两个 `window.alert` 一并换成 toast(同类问题:打断式反馈)。
+
+再一轮修订(`CACHE_NAME` → `tigang-v22`):
+
+22. **安装引导(ROADMAP N4,2026-09-12)**:训练页顶部新增可关闭薄卡 `#install-hint`,累计完成 3 次训练且未安装时出现。纯决策在 `core/install.js`(新文件,进预缓存清单);三个变体:捕获 `beforeinstallprompt` → 一键安装(浏览器自带迷你条被 `preventDefault` 收掉,单一入口)、iOS → 分享图标手动步骤、Android 无安装事件 → 菜单手动步骤;桌面装不了不显示。「已安装」每次启动现检不持久化;「已关闭」存设备本地 key `tigang_install_dismissed`,**不进 settings**(同步/备份不该跨设备搬运「装没装」)。训练中隐藏,显隐唯一驱动点在 `renderTrain()`。契约见 §8.aa,权衡见 DEVELOPMENT.md D39。
 
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

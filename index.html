@@ -37,6 +37,20 @@
       <!-- ======================= 训练 ======================= -->
       <section class="panel" id="panel-train" role="tabpanel" aria-labelledby="tab-train">
 
+        <!--
+          N4 安装引导:完成 3 次训练 + 未安装时出现(见 core/install.js)。
+          显隐由 renderTrain 统一驱动(训练中隐藏,与计数徽标同一条零打扰规矩);
+          变体文案由 app.js 按平台填充,一键安装按钮只在捕获 beforeinstallprompt 时出现。
+        -->
+        <div class="card install-hint" id="install-hint" hidden>
+          <div class="install-hint-text">
+            <p class="install-hint-title">装到主屏,更容易坚持</p>
+            <p class="install-hint-sub" id="install-hint-steps"></p>
+          </div>
+          <button type="button" class="btn btn-install" id="btn-install" hidden>立即安装</button>
+          <button type="button" class="install-hint-close" id="btn-install-dismiss" aria-label="不再提示">×</button>
+        </div>
+
         <div class="card plan-card">
           <button type="button" class="plan-head" id="plan-toggle" aria-expanded="false" aria-controls="plan-body">
             <span class="plan-head-text">

@@ -19,6 +19,7 @@ import {
 import { localDateStr, makeRecord, computeStreak, totals, lastNDays } from './core/stats.js';
 import { evaluate, unlockedIds, newlyUnlocked, dailyGoal } from './core/achievements.js';
 import { load, save, clearAll, exportJSON, parseBackup, mergeRecords } from './core/storage.js';
+import { installHintDecision } from './core/install.js';
 import { newUserId, normalizeUserId, checkPassphrase, MIN_PASSPHRASE_LENGTH, MIN_DIGITS_ONLY_LENGTH } from './core/sync.js';
 import { SyncCoordinator } from './sync/coordinator.mjs';
 import { syncDelete } from './sync/client.mjs';
@@ -127,6 +128,11 @@ const el = {
   btnSyncOverwrite: $('btn-sync-overwrite'),
   btnSyncNewId: $('btn-sync-new-id'),
 
+  installHint: $('install-hint'),
+  installHintSteps: $('install-hint-steps'),
+  btnInstall: $('btn-install'),
+  btnInstallDismiss: $('btn-install-dismiss'),
+
   toasts: $('toasts'),
 };
 
@@ -189,6 +195,11 @@ let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HO
 let idleHintText = '';
 // 最近一次完成的训练,供「分享今天的成果」画卡片用(reps / streak / 日期)
 let shareData = null;
+// N4 安装引导:决策结果 + 平台事件的一次性状态(决策函数在 core/install.js,接线在下方安装引导区段)
+let installDecision = { show: false };
+let deferredInstallPrompt = null; // beforeinstallprompt 只来一次,prompt()/userChoice 只能消费一次
+let installDismissed = false;     // 本会话内点过「不再提示」;持久层是设备本地 localStorage key
+let installedNow = false;         // appinstalled 在本会话触发过;下次启动靠 display-mode 现检,不用持久化
 // 同步状态(单元 3):主密码只在内存 + sessionStorage(tab 内刷新不丢,关 tab / PWA 新会话丢=降级重输),绝不进 localStorage
 let syncMasterPass = '';
 let syncUserId = ''; // 首次启用时 newUserId() 生成,存 localStorage 独立 key(不进 settings/exportJSON)
@@ -711,6 +722,10 @@ function renderTrain() {
   // 训练结束后 resetSession/finishSession 会重渲染回空闲态,徽标自动回来。
   if (el.siteStats) el.siteStats.hidden = running;
 
+  // N4 安装引导:同一条零打扰规矩 —— 是否出现由 installDecision(refreshInstallHint)决定,
+  // 训练中一律隐藏。这里是它唯一的显隐驱动点,与计数徽标共用。
+  if (el.installHint) el.installHint.hidden = running || !installDecision.show;
+
   // 计数口径:收紧(+维持)结束即记完成,但索引要到放松结束才推进 ——
   // 所以放松期间 repIndex 指向的正是刚做完的那一次,报已完成数就用 repIndex+1。
   if (!running) {
@@ -799,6 +814,9 @@ function renderStats() {
   });
   el.heatmap.textContent = '';
   el.heatmap.appendChild(frag);
+
+  // 完成次数可能刚跨过安装引导的阈值(第 3 次训练落账):顺手重算一次
+  refreshInstallHint();
 }
 
 function renderBadges(today) {
@@ -1870,6 +1888,106 @@ document.addEventListener('visibilitychange', () => {
   syncCircleToRemaining(session);
   // 后台期间秒数已经跳过好几拍,重新播种,免得切回来先补响一声不对位的 tick
   seedPhaseTick(session);
+  renderTrain();
+});
+
+/* ------------------------------------------------------------------ *
+ * N4 安装引导(训练页顶部薄卡,决策函数在 core/install.js)
+ *
+ * 触发口径 = 累计**完成** 3 次训练(不用「打开次数」:完成才是用过的诚实信号,
+ * 且不用新开计数器)。「装没装」「关没关」都是设备本地状态,不进 settings ——
+ * settings 会随端到端同步/备份走,A 设备的状态不该压住 B 设备(与 tigang_sync_user 同一先例)。
+ *
+ * 浏览器自带的安装迷你条被 preventDefault 收掉:全站只保留一个安装入口(本卡),
+ * 和「统一轻通知位」是同一条设计规矩 —— 同一件事只有一个地方出现。
+ * ------------------------------------------------------------------ */
+
+const INSTALL_DISMISS_KEY = 'tigang_install_dismissed';
+
+/** 已安装 = 以独立窗口运行。iOS 主屏 webapp 走 navigator.standalone,其余看 display-mode。 */
+function isStandaloneDisplay() {
+  if (navigator.standalone === true) return true;
+  try {
+    return window.matchMedia(
+      '(display-mode: standalone), (display-mode: minimal-ui), (display-mode: fullscreen)',
+    ).matches;
+  } catch {
+    return false;
+  }
+}
+
+/** 关闭标记的持久层;存储不可用(隐私模式等)时只保证本会话内不再出现。 */
+function readInstallDismissed() {
+  try {
+    return localStorage.getItem(INSTALL_DISMISS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+/** 重算决策并刷新卡内内容;hidden 不在这里定 —— 唯一显隐驱动在 renderTrain。 */
+function refreshInstallHint() {
+  installDecision = installHintDecision({
+    installed: installedNow || isStandaloneDisplay(),
+    dismissed: installDismissed || readInstallDismissed(),
+    finishedSessions: totals(data.records).finishedSessions,
+    ios: isIOSDevice(),
+    android: /Android/i.test(navigator.userAgent || ''),
+    canPrompt: !!deferredInstallPrompt,
+  });
+  if (!el.installHint) return;
+  const variant = installDecision.show ? installDecision.variant : null;
+  el.btnInstall.hidden = variant !== 'prompt';
+  el.installHintSteps.textContent =
+    variant === 'ios'
+      ? '在 Safari 里点分享图标 → 「添加到主屏幕」'
+      : variant === 'android'
+        ? '在浏览器菜单里选「安装应用 / 添加到主屏幕」'
+        : '像原生 App 一样打开,离线也能用';
+}
+
+window.addEventListener('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event; // 存住等用户点卡上的按钮,而不是浏览器自己弹
+  refreshInstallHint();
+  renderTrain();
+});
+
+window.addEventListener('appinstalled', () => {
+  installedNow = true;
+  deferredInstallPrompt = null;
+  refreshInstallHint();
+  renderTrain();
+  showToast({ id: 'installed', kind: 'ok', text: '已添加到主屏,下次从桌面图标直达' });
+});
+
+el.btnInstall.addEventListener('click', async () => {
+  const event = deferredInstallPrompt;
+  if (!event) return;
+  deferredInstallPrompt = null; // 一次性:消费后浏览器进入冷却期,变体自动降级为手动步骤
+  try {
+    event.prompt();
+  } catch {
+    /* 手势上下文异常等:忽略 */
+  }
+  try {
+    const choice = await event.userChoice;
+    if (choice && choice.outcome === 'accepted') return; // accepted 后 appinstalled 会跟上来收尾
+  } catch {
+    /* 旧浏览器不暴露 userChoice */
+  }
+  refreshInstallHint();
+  renderTrain();
+});
+
+el.btnInstallDismiss.addEventListener('click', () => {
+  installDismissed = true;
+  try {
+    localStorage.setItem(INSTALL_DISMISS_KEY, '1');
+  } catch {
+    /* 存不进就只保证本会话不再出现 */
+  }
+  refreshInstallHint();
   renderTrain();
 });
 

@@ -78,6 +78,7 @@ const el = {
   doneUnlocked: $('done-unlocked'),
   doneBadges: $('done-badges'),
   btnShare: $('btn-share'),
+  btnShareText: $('btn-share-text'),
   dlgShare: $('dlg-share'),
   shareImg: $('share-img'),
   btnSaveShare: $('btn-save-share'),
@@ -1195,6 +1196,42 @@ el.btnShareClose.addEventListener('click', () => {
   if (el.shareImg.src) {
     URL.revokeObjectURL(el.shareImg.src);
     el.shareImg.src = '';
+  }
+});
+
+/*
+ * N2 一键文案:比成果卡更轻的分享路径——有人就想在聊天框里粘一段话。
+ * 链接指向落地页而不是 /app/:收下的人先看到「这是啥、为什么练」,增长飞轮的第一环。
+ * 非 HTTPS(本地预览)不带链接——file:// 下拼出来的 URL 是废的,宁可不给。
+ */
+function buildShareText() {
+  const reps = shareData ? shareData.reps : 0;
+  const streak = shareData ? shareData.streak : 0;
+  const base = `今天我完成了 ${reps} 次凯格尔训练,连续第 ${streak} 天。免费、无广告,数据只存在本地,要不要一起?`;
+  return location.protocol === 'https:' ? `${base} ${location.origin}/` : base;
+}
+
+el.btnShareText.addEventListener('click', async () => {
+  if (!shareData) return;
+  const text = buildShareText();
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // 降级套路与同步 ID 复制一致:临时 textarea + execCommand,成不成都别抛给用户栈
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (!ok) throw new Error('execCommand 被拒绝');
+    }
+    showToast({ id: 'share-text', kind: 'ok', text: '已复制,粘贴给朋友就能邀请' });
+  } catch {
+    showToast({ id: 'share-text', kind: 'warn', text: '复制失败:浏览器不允许访问剪贴板' });
   }
 });
 

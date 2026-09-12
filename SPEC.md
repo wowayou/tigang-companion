@@ -365,6 +365,7 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 - `#done-next-bar` 进度条(宽度 = 下一枚连续类徽章的 progress)+ `#done-next` 文案(如 `再连续 2 天解锁「一周不断」`;连续类徽章已全部解锁则显示对应完结文案);
 - `#done-unlocked`(本次新解锁徽章的外层容器,无解锁时 `hidden`)+ `#done-badges`(徽章行,新解锁徽章带弹出动画)。新解锁的判定:写入记录前后各取一次 `unlockedIds` 快照,`newlyUnlocked(before, after)` 求差集。
 - `#btn-share` 分享按钮(ROADMAP N1):`finishSession` 把 `{ reps, streak, dateStr }` 存进模块级 `shareData`;点击后 `drawShareCard()` 在内存 canvas 画 1080×1440 成果卡(品牌 teal 渐变 + 同心圆环 + 今日收缩次数 + 连续天数 + 免责),转 PNG Blob → `navigator.canShare({files})` 支持就直接系统分享(Android Chrome),否则弹 `#dlg-share` 预览(iOS 长按保存 / `#btn-save-share` 下载)。零新依赖,canvas 不占任何 DOM id。
+- `#btn-share-text` 复制文字(ROADMAP N2):比成果卡更轻的分享路径——`buildShareText()` 用 `shareData` 拼一段邀请语,`https:` 下附落地页链接(`location.origin/`,收的人先看到「这是啥」再进应用;非 HTTPS 不带链接),clipboard API 写入,老浏览器降级临时 textarea + `execCommand('copy')`;成败都走 toast(`id: share-text`)。
 
 **提示音**(方向性设计,关闭语音也能靠耳朵分辨该干什么):懒创建 AudioContext(**必须在 start 按钮的点击处理器里创建/resume**,规避自动播放限制);sine 波、gain 0.05:
   - `prepare` 单音 587Hz;
@@ -447,7 +448,7 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 - 唯一保留的过渡是圆的底色:改用可过渡的 `background-color`(立体感交给一层固定不变的叠加渐变);v1 每阶段各写一条 `linear-gradient`,而渐变之间无法补间,才是最初「硬切」的来源。`transition-property: transform, background-color, color, box-shadow`,JS 只改第一项的时长(阶段秒数),配色固定 `.9s`——正因为它是边界上唯一还在动的东西,得慢一点才能把前后两个阶段连起来(`.5s` 试过,阶段之间显得各自独立)。各阶段同属青色系,插值干净。
 - 阶段名 `#phase-label` 换字时只做 `.16s`、从 `opacity:.4` 起的提亮,**不做位移、不从 0 起**:它是当前最要紧的指令,淡入 300ms 等于在最该看清的时刻看不清。靠 `restartAnimation()` 重放(置 `animation:none` → 强制回流 → 复原)。
 
-### §8.x DOM id 总表(app.js 实际引用的全部 85 个)
+### §8.x DOM id 总表(app.js 实际引用的全部 86 个)
 
 本表即 UI 与胶水层的接口面,改动任何一项都必须同步 index.html + app.js + 本表。
 校验方法(§10.3):把 app.js 里 `$('…')` 的参数逐个对照 index.html 的 `id="…"`,并反查本表有无遗漏。
@@ -460,7 +461,7 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 | 方案卡 | `plan-toggle` `plan-body` `plan-name` `plan-summary` `custom-panel` `cfg-contract` `cfg-relax` `cfg-reps` `cfg-sets` `cfg-rest` `opt-hold-enabled` `hold-sec-wrap` `cfg-hold` |
 | 引导圆与进度 | `coach-ring` `coach-circle`(button) `phase-label` `countdown` `set-progress` |
 | 控制按钮 | `btn-start` `btn-pause` `btn-stop` |
-| 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` |
+| 完成面板 | `done-panel` `done-reps` `done-duration` `done-streak-num` `done-next-bar` `done-next` `done-unlocked` `done-badges` `btn-share` `btn-share-text` |
 | 分享弹窗 | `dlg-share` `share-img` `btn-save-share` `btn-share-close` |
 | 统计页 | `streak-num` `today-goal` `badge-wall` `badge-count` `next-badge` `stat-days` `stat-sessions` `stat-reps` `stat-duration` `heatmap` `btn-export` `btn-import` `file-import` `btn-clear` |
 | 设置弹窗 | `dlg-settings` `opt-sound` `opt-soft-cue` `opt-voice` `opt-vibration` `opt-reminder-enabled` `reminder-time-row` `opt-reminder-time` `btn-sync-entry` `sync-entry-state` |

@@ -8,7 +8,7 @@
 |---|---|
 | 产品 | 提肛陪伴(KegelMate)PWA。落地页 `https://kegel.eigentime.org/`,应用 `/app/` |
 | 架构 | `core/` 纯函数层 + `app.js` 胶水层,零依赖、无构建;**两个** opt-in 后端:计数 Worker(`worker/`)+ 多端同步(`sync-server/`,端到端加密只存密文) |
-| 最近完成 | (2026-09-12)N4 安装引导(ROADMAP):`core/install.js` 纯决策 + 训练页薄卡,完成 3 次训练且未安装时出现,三变体(一键/iOS/Android),关闭永久,设备本地 key 不进 settings;`sw.js` → `tigang-v22`,测试 134 全绿。此前(2026-08-10)同步后端加了 `MAX_BUCKETS=10000` + `MAX_DB_BYTES=10GiB` 存储总闸,客户端保留 `507 quota` 语义;孤儿桶 DELETE + TTL 清扫仍保留 |
+| 最近完成 | (2026-09-12)增长件四连全落地:**N4 安装引导**(core/install.js 纯决策 + 三变体薄卡,D39/§8.aa)、**N5 断签挽回**(missedDaysBeforeToday + 空闲提示两档暖色文案,D40)、**N2 一键文案**(完成面板复制邀请语 + 落地页链接,D41)、**N6 落地页 SEO**(JSON-LD + 长文 + robots/sitemap,D42)。ROADMAP Next 系列至此只剩 N3(第 N 位使用者)。`sw.js` = `tigang-v22`,测试 141 全绿。此前(2026-08-10)同步后端有存储总闸 + 孤儿桶治理 |
 | git | `main` 全绿,工作区干净。容量保护基线 `47c7652` |
 | 计数 Worker | `tigang-counter.eigentime.workers.dev`;CI 有 `CLOUDFLARE_*` secrets,**每次 push 自动重部署** |
 | 同步后端 | `https://sync.eigentime.org` → 甲骨文机 systemd `sync`。容量保护已于 2026-08-10 手工部署并验活;Node 24、两个 quota 环境变量、内外 `/health` 与 docker0 监听均通过。**CI 不管后端部署**,步骤见 DEPLOY-SYNC.md |
@@ -47,15 +47,18 @@
 - **命令**:`npm test`(core/ 改动必跑,裸 `node --test`);`node tools/build-site.mjs`(组装 dist);`git push`(CI 自动:测试→Pages→计数 Worker,Worker 需 `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` secrets,已配置)。
 - **红线**:零依赖(不加 npm 包/CDN);`core/` 禁 DOM / `Date.now()` / `localStorage`;外部服务只有计数 Worker 与 opt-in 密文同步后端;发版升 `sw.js` 的 `CACHE_NAME`;同步 PUT 不得绕过 `sync/coordinator.mjs`;改接口同步 SPEC;「维持」`holdSec` 是全局键,`holdSec=0` 必须等价 v1 两段式。
 - **计数 Worker 本地验证**:`cd worker && npx wrangler dev`(会生成 `worker/.wrangler/`,已 gitignore);协议 + Hibernation 坑见 `worker/worker.js` 顶部注释与 D28。改 WebSocket 逻辑前**先确认走类方法还是 addEventListener**。
-- **建议接手顺序**:① ~~音效 2/3~~ ✅ 已完成(D30)→ ② 导入导出跨设备 1 → ③ 计数放置 5(已有调研,可立项)→ ④ 排行榜 4(维持 gated,不动)。
+- **建议接手顺序**:① ~~音效 2/3~~ ✅ 已完成(D30)→ ② 导入导出跨设备 1(backlog 首位,仍开放)→ ③ ~~计数放置 5~~ ✅ 已完成(D32)→ ④ ~~N4/N5/N2/N6 增长件~~ ✅ 已完成(D39-D42)→ ⑤ N3「第 N 位使用者」(需先定防重装重复计数的口径,见 ROADMAP N3)→ ⑥ 排行榜 4(维持 gated,不动)。
 
 ## 5. 交接时已验证
 
-### 2026-09-12 更新(N4 安装引导)
+### 2026-09-12 更新(增长件四连:N4/N5/N2/N6)
 
-- `npm test` **134 全绿**(122 + 安装决策新 12);`node --check` 过;`tools/build-site.mjs` 正常;`sw.js` = `tigang-v22`(预缓存清单加 `core/install.js`)。contracts 的 DOM id 双向契约与依赖图测试已覆盖新增 id(`install-hint` / `install-hint-steps` / `btn-install` / `btn-install-dismiss`)。
-- **未在真机验过**:① 一键安装按钮(`beforeinstallprompt` 的 `preventDefault` + `prompt()` 链路,Chrome/Edge 桌面或 Android 可验);② iOS 变体步骤文案观感;③ 薄卡在矮屏(≤700px 视口)上不把引导圆挤出首屏(样式上它只有 ~50px 高,理论无碍)。下次有真机信号优先看这三条。
-- 触发口径与取舍见 DEVELOPMENT.md **D39**;契约见 SPEC **§8.aa**。
+- `npm test` **141 全绿**(基线 122 + N4 决策 12 + N5 stats 7);`node --check` 过;`tools/build-site.mjs` 正常;`sw.js` = `tigang-v22`(预缓存清单加 `core/install.js`)。contracts 的 DOM id 双向契约与依赖图测试覆盖新增 id(`install-hint` / `install-hint-steps` / `btn-install` / `btn-install-dismiss` / `btn-share-text`,共 86 个)。
+- N4 曾在本地 IAB 做过端到端验证(真实事件路径):未达标不显示 / `beforeinstallprompt` 后一键按钮出现 / 关闭持久化 / 390×760 视口布局不挤(见 SPEC §8.aa 与 D39)。IAB 截图通道故障,视觉观感用几何+样式断言替代。
+- **未在真机验过**:① 一键安装按钮(`beforeinstallprompt` 的 `preventDefault` + `prompt()` 链路,Chrome/Edge 桌面或 Android 可验);② iOS 变体步骤文案观感;③ N5 断签文案的实际观感(可用假记录触发:改本机 records 日期即可);④ 落地页新增长文区在窄屏的排版。
+- N6:JSON-LD 已用脚本校验合法且 FAQ 问答全部存在于可见 HTML;上线后可用 Google Rich Results Test 复验。
+- 同步后端容量保护、孤儿桶治理的验活记录见下方 2026-08-08/08-10 段落,仍然有效。
+- 触发口径与取舍见 DEVELOPMENT.md **D39/D40/D41/D42**;契约见 SPEC **§8.aa / §4 / §8 / §12.22-23**。
 
 ### 2026-08-10 更新
 

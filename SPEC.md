@@ -613,4 +613,8 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 
 22. **安装引导(ROADMAP N4,2026-09-12)**:训练页顶部新增可关闭薄卡 `#install-hint`,累计完成 3 次训练且未安装时出现。纯决策在 `core/install.js`(新文件,进预缓存清单);三个变体:捕获 `beforeinstallprompt` → 一键安装(浏览器自带迷你条被 `preventDefault` 收掉,单一入口)、iOS → 分享图标手动步骤、Android 无安装事件 → 菜单手动步骤;桌面装不了不显示。「已安装」每次启动现检不持久化;「已关闭」存设备本地 key `tigang_install_dismissed`,**不进 settings**(同步/备份不该跨设备搬运「装没装」)。训练中隐藏,显隐唯一驱动点在 `renderTrain()`。契约见 §8.aa,权衡见 DEVELOPMENT.md D39。
 
+再一轮修订(`CACHE_NAME` → `tigang-v22`,与第 22 条同批发版):
+
+23. **留存小件三连(2026-09-12)**:**N5 断签挽回**——`core/stats.js` 新增 `missedDaysBeforeToday(records, todayStr)` 纯函数(从昨天往回数到最近完成日,从没练过返回 null);空闲提示新增两档:断 1 天「昨天断了 · 今天开始还来得及」、断 2-7 天「停了 N 天 · 回来接着练」(加 `.is-broken` 暖色,`--flame-ink`),断超一周回中性文案;不加额外按钮——空闲首屏本来就是整宽「开始训练」。**N2 一键文案**——完成面板「复制文字」`#btn-share-text` 与「分享卡片」并排:`buildShareText()` 用 `shareData` 拼邀请语,https 下附落地页链接,clipboard 优先 + textarea/execCommand 降级,toast 反馈(`id: share-text`);主按钮改名「分享卡片」消歧义。**N6 落地页 SEO**——canonical/OG + JSON-LD(WebApplication + FAQPage,问答与可见内容一一对应)+ robots.txt/sitemap.xml + 「为什么练/怎么练/常见问题」长文。见 DEVELOPMENT.md D40/D41/D42。
+
 详见 §2/§3/§5/§6/§8/§9 各节正文;设计取舍见 DEVELOPMENT.md D12 起(移除的理由见 D24)。

@@ -6,8 +6,68 @@
   <title>KegelMate · 提肛陪伴 — 每天两分钟,把盆底肌练成肌肉记忆</title>
   <meta name="description" content="提肛(凯格尔/盆底肌)训练陪伴 PWA:节奏引导动画、打卡统计、成就徽章。默认本地存储,可选端到端加密同步,免费无广告。">
   <meta name="theme-color" content="#0f9b8e">
+  <link rel="canonical" href="https://kegel.eigentime.org/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="KegelMate · 提肛陪伴">
+  <meta property="og:title" content="KegelMate · 提肛陪伴 — 每天两分钟,把盆底肌练成肌肉记忆">
+  <meta property="og:description" content="提肛(凯格尔/盆底肌)训练陪伴 PWA:节奏引导动画、打卡统计、成就徽章。免费无广告,默认本地存储。">
+  <meta property="og:url" content="https://kegel.eigentime.org/">
+  <meta property="og:image" content="https://kegel.eigentime.org/app/icon-512.png">
   <link rel="icon" type="image/svg+xml" href="app/icon.svg">
   <link rel="stylesheet" href="styles.css">
+  <!--
+    结构化数据(N6)。规矩:FAQPage 的问答必须与页面上可见内容一致 —— 只写页面里真实存在的,
+    不塞「搜索关键词问答」。Google 自 2023 年起把 FAQ/HowTo 富摘要限制在权威健康站点,
+    所以这里的收益是机器可读性,不指望富摘要;别为它编内容。
+  -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebApplication",
+        "name": "KegelMate · 提肛陪伴",
+        "url": "https://kegel.eigentime.org/",
+        "applicationCategory": "HealthApplication",
+        "operatingSystem": "Web",
+        "inLanguage": "zh-CN",
+        "description": "提肛(凯格尔/盆底肌)训练陪伴 PWA:节奏引导动画、打卡统计、成就徽章。默认本地存储,可选端到端加密同步,免费无广告。",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" },
+        "featureList": ["节奏引导", "打卡统计与连续天数", "成就徽章", "数据本地存储", "可选端到端加密同步", "离线可用"]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "提肛训练和凯格尔训练是一回事吗?",
+            "acceptedAnswer": { "@type": "Answer", "text": "是。凯格尔(Kegel)训练就是盆底肌训练,中文习惯叫「提肛」,传统养生称「撮谷道」——通过有节奏的收缩、放松来锻炼盆底肌群。" }
+          },
+          {
+            "@type": "Question",
+            "name": "每天要练多久?",
+            "acceptedAnswer": { "@type": "Answer", "text": "参考 Mayo Clinic 与 NHS 的建议:每天 2-3 组、每组 8-12 次,每次收缩 3-10 秒后等长放松,全程约两分钟。本应用的四个预设方案按此设计。" }
+          },
+          {
+            "@type": "Question",
+            "name": "多久能看到效果?",
+            "acceptedAnswer": { "@type": "Answer", "text": "通常坚持 6-12 周会有明显改善,贵在每天坚持,而不是单次练多久。" }
+          },
+          {
+            "@type": "Question",
+            "name": "什么人不适合练?",
+            "acceptedAnswer": { "@type": "Answer", "text": "急性痔疮发作期、肛周感染、肛肠术后恢复期、盆底肌过度紧张(慢性盆腔痛)的人群请先咨询医生;孕期练习前建议咨询产科医生;练习中出现疼痛请立即停止并就医。" }
+          },
+          {
+            "@type": "Question",
+            "name": "我的训练数据会被上传吗?",
+            "acceptedAnswer": { "@type": "Answer", "text": "默认只保存在本机浏览器。只有你主动开启多端同步时,应用才会上传由主密码端到端加密的密文,服务器无法看到明文;也可以随时导出备份文件。" }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
 
@@ -48,6 +108,41 @@
         <h3>免费 · 无广告</h3>
         <p>零依赖、零注册。安装到主屏后离线也能用,同步服务不可用时不影响训练。</p>
       </div>
+    </section>
+
+    <!-- N6 SEO:可读长文。内容与应用「知识」页同源(健康文案红线:必须保留免责声明)。 -->
+    <section class="article" id="why">
+      <h2>为什么值得练</h2>
+      <ul>
+        <li>促进肛周静脉回流,预防和缓解痔疮、肛裂等问题,久坐人群尤其受益</li>
+        <li>增强盆底肌:改善漏尿、预防盆腔脏器脱垂;是产后盆底修复的基础训练</li>
+        <li>男性前列腺术后尿控恢复的常用辅助训练</li>
+        <li>传统养生称「撮谷道」,相传乾隆皇帝常年坚持</li>
+      </ul>
+    </section>
+
+    <section class="article" id="how">
+      <h2>怎么练才对</h2>
+      <ol>
+        <li><strong>找对肌肉</strong>:像「忍住排气 / 中断排尿」那样收紧会阴部;可以用中断排尿的感觉定位肌肉,但不要经常在排尿时练习(可能导致排尿不尽、增加尿路感染风险)</li>
+        <li><strong>放松发力</strong>:收紧时正常呼吸、不要憋气;腹部、大腿、臀部保持放松,只用盆底发力</li>
+        <li><strong>循序渐进</strong>:从收缩 3 秒起步,逐步延长到 10 秒;慢速练耐力,快速练反应</li>
+        <li><strong>贵在坚持</strong>:每天两分钟,通常坚持 6-12 周会有明显改善</li>
+      </ol>
+    </section>
+
+    <section class="faq" id="faq">
+      <h2>常见问题</h2>
+      <h3>提肛训练和凯格尔训练是一回事吗?</h3>
+      <p>是。凯格尔(Kegel)训练就是盆底肌训练,中文习惯叫「提肛」,传统养生称「撮谷道」——通过有节奏的收缩、放松来锻炼盆底肌群。</p>
+      <h3>每天要练多久?</h3>
+      <p>参考 Mayo Clinic 与 NHS 的建议:每天 2-3 组、每组 8-12 次,每次收缩 3-10 秒后等长放松,全程约两分钟。本应用的四个预设方案按此设计。</p>
+      <h3>多久能看到效果?</h3>
+      <p>通常坚持 6-12 周会有明显改善,贵在每天坚持,而不是单次练多久。</p>
+      <h3>什么人不适合练?</h3>
+      <p>急性痔疮发作期、肛周感染、肛肠术后恢复期、盆底肌过度紧张(慢性盆腔痛)的人群请先咨询医生;孕期练习前建议咨询产科医生;练习中出现疼痛请立即停止并就医。</p>
+      <h3>我的训练数据会被上传吗?</h3>
+      <p>默认只保存在本机浏览器。只有你主动开启多端同步时,应用才会上传由主密码端到端加密的密文,服务器无法看到明文;也可以随时导出备份文件。</p>
     </section>
 
     <section class="howto" id="install">

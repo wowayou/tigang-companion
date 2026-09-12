@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://kegel.eigentime.org/sitemap.xml

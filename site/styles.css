@@ -135,6 +135,23 @@ body {
 .feat h3 { margin: 0 0 6px; font-size: 16px; color: var(--teal-dark); }
 .feat p { margin: 0; font-size: 14px; color: var(--muted); }
 
+/* ---------------- 长文与 FAQ(N6 SEO:内容与应用「知识」页同源) ---------------- */
+
+.article,
+.faq {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 30px 20px 0;
+}
+.article h2,
+.faq h2 { margin: 0 0 14px; font-size: 21px; }
+.article ul,
+.article ol { margin: 0; padding-left: 20px; font-size: 14.5px; }
+.article li { margin-bottom: 8px; }
+.article li strong { font-weight: 600; }
+.faq h3 { margin: 18px 0 6px; font-size: 15.5px; color: var(--teal-dark); }
+.faq p { margin: 0; font-size: 14px; color: var(--muted); }
+
 /* ---------------- 安装 ---------------- */
 
 .howto {

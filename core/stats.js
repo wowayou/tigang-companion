@@ -91,6 +91,24 @@ export function longestStreak(records) {
   return best;
 }
 
+/**
+ * 今天之前连续「断」的天数:从昨天往回数,直到碰上一个 finished 记录日。
+ * 返回:昨天及以前连续未完成的天数;从没完成过任何训练 → null(没有「断」可言)。
+ * N5 断签挽回据此给「还来得及」的提示:1 = 昨天刚断(主口径);与 computeStreak 互补——
+ * streak 为 0 且 !met 时 missed 必 ≥ 1。
+ */
+export function missedDaysBeforeToday(records, todayStr) {
+  const done = finishedDateSet(records);
+  if (done.size === 0) return null;
+  let cursor = addDays(todayStr, -1);
+  let missed = 0;
+  while (!done.has(cursor)) {
+    missed += 1;
+    cursor = addDays(cursor, -1);
+  }
+  return missed;
+}
+
 /** 汇总:{ sessions, finishedSessions, totalReps, totalDurationSec, activeDays }。 */
 export function totals(records) {
   const list = asArray(records);

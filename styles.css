@@ -570,6 +570,12 @@ body {
   min-height: 1.6em;
 }
 
+/* N5 断签挽回:暖调只服务于「最需要使劲的地方」(火苗/维持/断签),这里用深一档的 ink 保证 13.5px 可读 */
+.set-progress.is-broken {
+  color: var(--flame-ink);
+  font-weight: 600;
+}
+
 /* ---------------- 按钮 ---------------- */
 
 /*

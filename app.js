@@ -16,7 +16,7 @@ import {
   remainingInPhaseMs,
   overallProgress,
 } from './core/engine.js';
-import { localDateStr, makeRecord, computeStreak, totals, lastNDays } from './core/stats.js';
+import { localDateStr, makeRecord, computeStreak, totals, lastNDays, missedDaysBeforeToday } from './core/stats.js';
 import { evaluate, unlockedIds, newlyUnlocked, dailyGoal } from './core/achievements.js';
 import { load, save, clearAll, exportJSON, parseBackup, mergeRecords } from './core/storage.js';
 import { installHintDecision } from './core/install.js';
@@ -193,6 +193,8 @@ let voicePrimed = false;
 let lastHoldSec = data.settings.holdSec > 0 ? data.settings.holdSec : DEFAULT_HOLD_SEC;
 // 空闲态那行提示里要显示连续天数,但 renderTrain 每 100ms 跑一次,不能每次都去算统计
 let idleHintText = '';
+// N5 断签挽回:当前空闲提示是否处于「断签」档(渲染时染上暖色,见 .set-progress.is-broken)
+let idleHintBroken = false;
 // 最近一次完成的训练,供「分享今天的成果」画卡片用(reps / streak / 日期)
 let shareData = null;
 // N4 安装引导:决策结果 + 平台事件的一次性状态(决策函数在 core/install.js,接线在下方安装引导区段)
@@ -666,16 +668,30 @@ function setPlanOpen(open) {
   el.planToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
-/** 空闲态那行文字:与其空着,不如告诉用户「今天练没练」。 */
+/** 空闲态那行文字:与其空着,不如告诉用户「今天练没练」;断签了则给一句诚实的「还来得及」。 */
 function refreshIdleHint(today = localDateStr(new Date())) {
   const goal = dailyGoal(data.records, today);
   const streak = computeStreak(data.records, today);
   if (goal.met) {
     idleHintText = streak > 0 ? `今天已完成 · 连续 ${streak} 天` : '今天已完成';
+    idleHintBroken = false;
   } else if (streak > 0) {
     idleHintText = `连续 ${streak} 天 · 今天还没练`;
+    idleHintBroken = false;
   } else {
-    idleHintText = '准备好就开始';
+    // N5 断签挽回:昨天刚断是主口径;断更久如实报天数(口径诚实,不写「昨天断了」的假话);
+    // 断超过一周回到中性文案 —— 对离开很久的人制造愧疚感只会把人推得更远
+    const missed = missedDaysBeforeToday(data.records, today);
+    if (missed === 1) {
+      idleHintText = '昨天断了 · 今天开始还来得及';
+      idleHintBroken = true;
+    } else if (missed >= 2 && missed <= 7) {
+      idleHintText = `停了 ${missed} 天 · 回来接着练`;
+      idleHintBroken = true;
+    } else {
+      idleHintText = '准备好就开始';
+      idleHintBroken = false;
+    }
   }
 }
 
@@ -728,6 +744,8 @@ function renderTrain() {
 
   // 计数口径:收紧(+维持)结束即记完成,但索引要到放松结束才推进 ——
   // 所以放松期间 repIndex 指向的正是刚做完的那一次,报已完成数就用 repIndex+1。
+  // N5:断签档染上全局唯一的暖调,和火苗同一条「最需要使劲的地方」语义;训练中一律摘掉
+  el.setProgress.classList.toggle('is-broken', !running && idleHintBroken);
   if (!running) {
     el.setProgress.textContent = idleHintText;
   } else if (s.phase === 'rest') {

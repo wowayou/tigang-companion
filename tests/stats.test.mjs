@@ -244,3 +244,45 @@ test('longestStreak 与 computeStreak 的区别:历史连续过、现在已断�
   assert.equal(computeStreak(records, '2026-08-02'), 0);
   assert.equal(longestStreak(records), 7);
 });
+
+/* ---------------- N5 断签挽回:missedDaysBeforeToday ---------------- */
+
+import { missedDaysBeforeToday } from '../core/stats.js';
+
+test('missedDaysBeforeToday:从没完成过(空 / 只有 unfinished)→ null,没有「断」可言', () => {
+  assert.equal(missedDaysBeforeToday([], '2026-09-12'), null);
+  assert.equal(missedDaysBeforeToday([rec('2026-09-10', { finished: false })], '2026-09-12'), null);
+});
+
+test('missedDaysBeforeToday:昨天练过 → 0(未断签,不提示)', () => {
+  const records = [rec('2026-09-10'), rec('2026-09-11')];
+  assert.equal(missedDaysBeforeToday(records, '2026-09-12'), 0);
+});
+
+test('missedDaysBeforeToday:昨天刚断(最后完成在前天)→ 1,主口径', () => {
+  const records = [rec('2026-09-08'), rec('2026-09-09'), rec('2026-09-10')];
+  assert.equal(missedDaysBeforeToday(records, '2026-09-12'), 1);
+});
+
+test('missedDaysBeforeToday:连断多天如实计数', () => {
+  const records = [rec('2026-09-05'), rec('2026-09-08')];
+  assert.equal(missedDaysBeforeToday(records, '2026-09-12'), 3);
+});
+
+test('missedDaysBeforeToday:今天练过不影响口径(只看昨天以前)', () => {
+  const records = [rec('2026-09-10'), rec('2026-09-12')];
+  assert.equal(missedDaysBeforeToday(records, '2026-09-12'), 1);
+});
+
+test('missedDaysBeforeToday:unfinished 记录不算断点', () => {
+  const records = [rec('2026-09-10'), rec('2026-09-11', { finished: false })];
+  assert.equal(missedDaysBeforeToday(records, '2026-09-12'), 1);
+});
+
+test('missedDaysBeforeToday 与 computeStreak 互补:streak=0 且有历史时 missed>=1', () => {
+  const records = [rec('2026-09-05'), rec('2026-09-06')];
+  const today = '2026-09-12';
+  if (computeStreak(records, today) === 0) {
+    assert.ok(missedDaysBeforeToday(records, today) >= 1);
+  }
+});

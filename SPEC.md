@@ -167,6 +167,11 @@ export function computeStreak(records, todayStr) {}
 // 用于成就系统:断档后已解锁的连续类徽章不该被收回,见 §6.1 设计理由。
 export function longestStreak(records) {}
 
+// 今天之前连续「断」的天数:从昨天往回数直到碰上一个 finished 记录日(N5 断签挽回)。
+// 从没完成过 → null(没有「断」可言);昨天练过 → 0。与 computeStreak 互补:
+// streak 为 0 且当日未达标时 missed 必 ≥ 1。
+export function missedDaysBeforeToday(records, todayStr) {}
+
 // { sessions, finishedSessions, totalReps, totalDurationSec, activeDays }
 // activeDays = 有 ≥1 条 finished 记录的不同日期数
 export function totals(records) {}
@@ -348,7 +353,7 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 
 - **进度环 `#coach-ring`**:取代旧的条形 `#overall-bar`(已删除)。`conic-gradient(var(--teal) calc(var(--p) * 1%), #dfeae7 0)` + `mask: radial-gradient(...)` 掏空成环;进度由行内 `style="--p:<0-100>"` 驱动(=overallProgress×100)。**三层结构不可合并**:`.coach-ring` / `.coach-stage` / `.coach-circle`,环与 stage 靠 `grid-area:1/1` 叠在同一格(不用 `position:absolute`——绝对定位子元素在 grid 容器里的静态位置各家实现不一致);环**不能是圆的父元素**,否则 mask 会把圆一起裁掉;圆 `scale(0.62)` 呼吸时环必须固定不动,否则进度跟着缩放读不准。空闲/完成态加 `.is-idle`(`background:none`)让整圈留白,免得 0% 的灰环像坏了。
 - **`#countdown` 双形态**:运行中是秒数;空闲显示 `▶`、完成显示 `✓`,此时加 `.is-glyph`(字号降到 34px)。空闲态不用 `—`——那读起来像「没数据」而不是「待命」,`▶` 同时提示圆可点。
-- 进度文案:`#set-progress`。运行中 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `准备好就开始`(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。
+- 进度文案:`#set-progress`。运行中 `第 {setIndex+1}/{sets} 组 · 第 {repIndex+1}/{repsPerSet} 次`(rest 阶段显示 `休息中 · 即将开始第 {setIndex+1} 组`);**空闲态**改为显示今日打卡状态而非空着,如 `连续 5 天 · 今天还没练` / `今天已完成 · 连续 5 天` / `今天已完成` / `昨天断了 · 今天开始还来得及`(N5,`missedDaysBeforeToday===1`,加 `.is-broken` 暖色)/ `停了 N 天 · 回来接着练`(N5,断 2-7 天,同样 `.is-broken`)/ `准备好就开始`(从未练过或断超一周,不制造愧疚感)(取决于当日 `dailyGoal` 是否达标与当前 `streak`)。
 
 - 按钮:`#btn-start`(开始训练,done 态文案变为"再来一次")、`#btn-pause`(暂停/继续,文案随态切换)、`#btn-stop`(结束)。**按状态出按钮**:空闲态只留 `#btn-start` 并占满整宽,运行态换成 `#btn-pause` + `#btn-stop`;隐藏用 `hidden`(`.controls` 是 flex + `flex:1`,藏掉的不占位),`disabled` 同时保留以防 hidden 切换间隙被键盘激活。驱动:`setInterval` 100ms,`next = tick(state, Date.now())`;**阶段推进**(phase 或 setIndex/repIndex 任一变化——`restSec=0` 时跨组是 contract→contract,仅比较 phase 会漏一拍)时触发提示音/语音/震动 + 圆与环重新进入动画;done 时写入记录并展示完成面板 `#done-panel`。
 - `#btn-stop` 训练中点击 → `confirm('确定结束本次训练?')`;若 `completedReps>0` 以 `finished:false` 记录后 reset。

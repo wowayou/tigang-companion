@@ -1180,7 +1180,7 @@ body {
 
 .opt-row.is-sub .opt-text { font-size: 14px; }
 
-/* 一行摘要 + 右箭头,点进二级弹窗 */
+/* 一行摘要 + 右箭头:点进二级弹窗(button)或跳外链(a),两种都要抹掉各自的浏览器默认样式 */
 .opt-entry {
   width: 100%;
   border: 0;
@@ -1189,6 +1189,7 @@ body {
   font-family: inherit;
   color: inherit;
   text-align: left;
+  text-decoration: none;
 }
 
 .opt-entry-value {

@@ -65,6 +65,14 @@ ROADMAP.md            增长机制路线图
 
 push 到 `main` 自动:跑测试 → `tools/build-site.mjs` 组装(落地页在根路径,应用到 `/app/`)→ 部署 GitHub Pages;同时用 wrangler 自动部署计数 Worker(需在仓库配 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`,未配置则跳过)。线上地址:`https://kegel.eigentime.org/`(落地页)与 `https://kegel.eigentime.org/app/`(应用)。移植到 Cloudflare Pages / Netlify / Vercel / 自建服务器及自定义域名说明见 [DEPLOY.md](DEPLOY.md)。
 
+## Support
+
+如果这个项目对你有帮助,可以在这里支持我的创作:
+
+https://eigentime.org/support?from=kegel
+
+完全自愿,不对应任何额外功能或权益,也不影响免费使用。
+
 ## 免责声明
 
 本应用仅供健康锻炼参考,不构成医疗建议。急性痔疮发作期、肛周感染、肛肠术后、盆底肌过度紧张(慢性盆腔痛)人群请先咨询医生;练习中出现疼痛请立即停止并就医。

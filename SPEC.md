@@ -388,10 +388,11 @@ contracts.test.mjs 至少覆盖:DOM id 双向契约、app.js 本地模块依赖�
 **震动**:`navigator.vibrate` 存在且 `settings.vibration` 时,按阶段各不同的 pattern(contract/hold/relax/rest/done)。
 
 - 屏幕常亮:start 时 `navigator.wakeLock?.request('screen')` try/catch,done/stop 时 release。
-- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`。**分三组**,每组一个 `.opt-group` + `.opt-group-title`(声音 / 提醒 / 同步),说明文字紧跟各自开关而非全堆在弹窗底部——七个开关平铺加常驻展开的同步区块会长到要滚两屏。
+- 右上角 `#btn-settings`(齿轮)打开 `<dialog id="dlg-settings">`。**分四组**,每组一个 `.opt-group` + `.opt-group-title`(声音与反馈 / 提醒 / 数据 / 关于),说明文字紧跟各自开关而非全堆在弹窗底部——七个开关平铺加常驻展开的同步区块会长到要滚两屏。
   - **声音**:`#opt-sound`、`#opt-voice`、`#opt-vibration`(均为 `.switch`)。`#opt-soft-cue`(轻提示)是 `#opt-sound` 的**子项**(`.opt-row.is-sub`,缩进 + 左侧竖线 + 小一号字):它逻辑上受总开关约束(`disabled = !sound`),视觉层级必须与之一致。
   - **提醒**:`#opt-reminder-enabled` + `#opt-reminder-time`(`<input type="time">`)。时间行包在 `#reminder-time-row` 里,**随开关 hidden**——关着提醒还占一行是白占。
-  - **同步**:折叠成单行入口 `#btn-sync-entry`(`.opt-row.opt-entry`,右侧 `#sync-entry-state` 显示「未开启 / 已开启」,开启时整行 `.is-on` 转主色),点开二级 `<dialog id="dlg-sync">`。同步区块占了原弹窗六成高度而绝大多数用户从不开它,必须让路。
+  - **数据**:折叠成单行入口 `#btn-sync-entry`(`.opt-row.opt-entry`,右侧 `#sync-entry-state` 显示「未开启 / 已开启」,开启时整行 `.is-on` 转主色),点开二级 `<dialog id="dlg-sync">`。同步区块占了原弹窗六成高度而绝大多数用户从不开它,必须让路。
+  - **关于**:两条无 id 的纯外链(`a.opt-row.opt-entry`,复用同一套行样式与右箭头)——「开源项目」→ 仓库,「支持作者」→ `https://eigentime.org/support?from=kegel`。两条**必须** `target="_blank" rel="noopener"`:standalone 装机态没有地址栏,同标签页跳外站后用户只能杀进程重开。赞助**只能**指向 `eigentime.org/support` 中转页,不得直连收款平台(换/加平台时改中转页即可,不必为此发新版);`from=kegel` 的归因与埋点都在中转页完成,**本应用不引任何第三方统计**(与落地页隐私口径一致)。
 - 开启提醒时请求 Notification 权限;app.js 里用 setTimeout 排到下一次 HH:MM 触发 `new Notification('提肛时间到 💪', { body: '花两分钟完成今天的训练吧' })`,触发后自动排到明天。
 - `.switch`:v1 是原生 checkbox(iOS 上渲染成带蓝色聚焦框的方块勾,与整体视觉不搭);v2 改成 `appearance: none` 自绘的 iOS 风格开关(胶囊轨道 + 圆形滑块,`:checked` 切换位置与背景色)。
 

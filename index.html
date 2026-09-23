@@ -371,6 +371,35 @@
 
     <p class="hint">不开语音也能不看屏幕:收紧是上行音、维持是双平音、放松是下行音。</p>
 
+    <!--
+      「关于」:项目与赞助入口,放在设置最底(通用惯例,也不打扰任何训练流程)。
+      两条外链都必须 target="_blank" —— standalone 装机态下同标签页跳转会把应用自己
+      导航到外站,而 standalone 没有地址栏可退,用户只能杀进程重开(PWA 经典坑)。
+      赞助走 eigentime.org/support 中转而非直连收款平台:以后换/加平台只改中转页,
+      不必为此发新版(否则每次都要跟着升 CACHE_NAME 才能让老用户拿到新链接)。
+    -->
+    <div class="opt-group">
+      <p class="opt-group-title">关于</p>
+
+      <a class="opt-row opt-entry" href="https://github.com/wowayou/tigang-companion" target="_blank" rel="noopener">
+        <span class="opt-text">开源项目<small class="opt-sub">代码公开,欢迎提 issue</small></span>
+        <span class="opt-entry-value">GitHub
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 5.5 15.5 12 9 18.5"></path>
+          </svg>
+        </span>
+      </a>
+
+      <a class="opt-row opt-entry" href="https://eigentime.org/support?from=kegel" target="_blank" rel="noopener">
+        <span class="opt-text">支持作者<small class="opt-sub">完全自愿,不影响任何功能</small></span>
+        <span class="opt-entry-value">❤️ 爱发电
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M9 5.5 15.5 12 9 18.5"></path>
+          </svg>
+        </span>
+      </a>
+    </div>
+
     <form method="dialog" class="dlg-actions">
       <button class="btn btn-primary" value="close">完成</button>
     </form>

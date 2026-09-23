@@ -2120,9 +2120,12 @@ const counter = {
     if (this.visitSent) return;
     this.visitSent = true;
     try {
+      // Content-Type 用 text/plain(CORS 简单请求)而非 application/json,
+      // 让浏览器省掉一次预检 OPTIONS 往返;body 仍是 JSON,worker 的 request.json()
+      // 不校验 Content-Type、且有 try/catch 容错,服务端无需改。
       await fetch(`${COUNTER_ORIGIN}/visit`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({ visitorId: this.visitorId }),
         keepalive: true,
       });
